@@ -180,15 +180,26 @@ export function RetentionClient({ customers }: Props) {
                     <p>{action.expected_outcome}</p>
                   </div>
                 </div>
-                {action.trace && action.trace.length > 0 && (
-                  <details className="mt-2">
-                    <summary className="text-[13px] font-semibold text-[#4F46E5] cursor-pointer select-none">
-                      Agent reasoning trace ({(action.trace as unknown[]).length} tool calls)
-                    </summary>
-                    <pre className="mt-2 text-[11px] bg-[#F5F3FF] rounded-xl p-3 overflow-x-auto text-[#1E1B4B]">
-                      {JSON.stringify(action.trace, null, 2)}
-                    </pre>
-                  </details>
+                {action.trace && (action.trace as unknown[]).length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-[12px] font-bold uppercase tracking-wide text-[#7C3AED] mb-2">
+                      Agent Reasoning — {(action.trace as unknown[]).length} tool calls
+                    </p>
+                    <div className="space-y-2">
+                      {(action.trace as { round: number; tool: string; args: Record<string, unknown>; result: unknown }[]).map((step, si) => (
+                        <div key={si} className="bg-[#F5F3FF] border border-[#DDD6FE] rounded-xl px-4 py-3">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="w-5 h-5 rounded-full bg-[#6366F1] text-white text-[10px] font-bold flex items-center justify-center shrink-0">{step.round}</span>
+                            <span className="text-[13px] font-semibold text-[#4338CA]">{step.tool}</span>
+                          </div>
+                          <p className="text-[11px] text-[#6B7280] mb-1">Args: {JSON.stringify(step.args)}</p>
+                          <p className="text-[11px] text-[#1E1B4B] bg-white rounded-lg px-2 py-1 border border-[#E0E7FF] overflow-x-auto whitespace-pre-wrap">
+                            {typeof step.result === "string" ? step.result : JSON.stringify(step.result, null, 1)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -246,27 +257,48 @@ export function RetentionClient({ customers }: Props) {
             )}
           </div>
 
+          {/* Suggested prompts when empty */}
+          {chatMessages.length === 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2 mb-4">
+              {[
+                "Tell me about customer 50001",
+                "Which At-Risk customers are most urgent?",
+                "Is it worth offering a discount to high-churn Lapsed customers?",
+                "What are the top churn drivers across all segments?",
+              ].map((prompt) => (
+                <button
+                  key={prompt}
+                  onClick={() => { setChatInput(prompt); }}
+                  className="text-left px-4 py-3 rounded-xl border-2 border-[#DDD6FE] bg-white text-[13px] text-[#6366F1] font-medium hover:border-[#6366F1] transition-all"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Input */}
-          <div className="flex gap-3">
+          <div className="flex gap-3 mt-2">
             <textarea
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
-              placeholder="Ask about a customer, segment, or intervention…"
-              rows={3}
+              placeholder="Ask about a customer, segment, or intervention… (Enter to send, Shift+Enter for new line)"
+              rows={4}
               className="flex-1 rounded-xl border-2 border-[#818CF8] bg-white px-4 py-3 text-[14px] text-[#1E1B4B] resize-none focus:outline-none focus:border-[#4F46E5] focus:shadow-[0_0_0_4px_rgba(99,102,241,0.18)]"
             />
             <button
               onClick={sendChat}
               disabled={!chatInput.trim() || chatLoading}
-              className="px-5 py-2 rounded-xl font-bold text-[14px] text-white disabled:opacity-50 self-end"
-              style={{ background: "linear-gradient(135deg, #6366F1, #4338CA)" }}
+              className="px-6 py-3 rounded-xl font-bold text-[14px] text-white disabled:opacity-50 self-end transition-all hover:-translate-y-0.5"
+              style={{ background: "linear-gradient(135deg, #6366F1, #4338CA)", boxShadow: "0 4px 16px rgba(99,102,241,0.35)" }}
             >
               Send
             </button>
           </div>
+          <p className="text-[12px] text-[#9CA3AF] mt-1.5">The AI uses real data from Supabase. It calls multiple tools before answering — responses take 10–20 seconds.</p>
           {chatMessages.length > 0 && (
-            <button onClick={() => setChatMessages([])} className="text-[13px] text-[#EF4444] font-semibold">
+            <button onClick={() => setChatMessages([])} className="text-[13px] text-[#EF4444] font-semibold mt-1">
               Clear conversation
             </button>
           )}

@@ -9,3 +9,4 @@ mlruns/
 # data/processed/ and models/ are intentionally tracked so Streamlit Cloud
 # can serve the pre-built models without re-running the pipeline.
 
+.env.local

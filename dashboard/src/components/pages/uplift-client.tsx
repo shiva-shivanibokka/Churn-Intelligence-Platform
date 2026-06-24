@@ -47,7 +47,7 @@ export function UpliftClient({ customers }: Props) {
         x: rows.map((c) => c.churn_probability),
         y: rows.map((c) => c.uplift_score),
         text: rows.map((c) => `${c.customer_id}<br>Segment: ${c.segment}<br>ROI: $${c.net_roi.toFixed(0)}`),
-        marker: { size: 7, color: TYPE_COLORS[t] ?? "#6B7280", opacity: 0.8, line: { width: 0.5, color: "white" } },
+        marker: { size: 9, color: TYPE_COLORS[t] ?? "#6B7280", opacity: 0.75, line: { width: 1, color: "white" } },
         hovertemplate: "%{text}<extra>%{fullData.name}</extra>",
       };
     });
@@ -200,7 +200,7 @@ export function UpliftClient({ customers }: Props) {
       <div className="h-8" />
 
       {/* Top Persuadables table */}
-      <SectionHeading>Top 15 Persuadables by Net ROI — Your Campaign Priority List</SectionHeading>
+      <SectionHeading>Top 15 Persuadables by Net ROI — Campaign Priority List</SectionHeading>
       <div className="bg-[#EEF2FF] border border-[#DDD6FE] rounded-xl px-4 py-2.5 mb-3 text-[13px] text-[#4338CA]">
         These are the customers where a retention intervention is both <em>most likely to work</em> (positive uplift score) and <em>most financially valuable</em> (highest net ROI after intervention cost). Run your next campaign starting from the top of this list — it maximises return per dollar spent.
       </div>
@@ -227,6 +227,28 @@ export function UpliftClient({ customers }: Props) {
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* Glossary */}
+      <div className="mt-8 bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl p-5">
+        <p className="text-[12px] font-bold uppercase tracking-wide text-[#64748B] mb-3">Parameter Glossary</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[13px]">
+          {[
+            ["Uplift Score", "T-S learner output: P(stay | intervention) − P(stay | no intervention). Positive = intervention helps, Negative = intervention backfires."],
+            ["Persuadable", "High churn risk AND positive uplift — intervention is both needed and effective. Your primary campaign audience."],
+            ["Sure Thing", "Would stay regardless of intervention. Spending budget here is waste."],
+            ["Lost Cause", "High churn risk but intervention won't change the outcome. Save the budget."],
+            ["Sleeping Dog", "Low churn risk but intervention might actually increase their churn probability. Leave them alone."],
+            ["Net ROI", "Expected financial return per intervention: Uplift Score × Customer Lifetime Value (CLV) − Intervention Cost. Positive = financially justified."],
+            ["T-S Learner", "Two-model (Treatment-Subgroup) causal ML architecture. One XGBoost model trained on treated customers, one on control. Uplift = difference in predictions."],
+            ["Intervention Priority", "Ranked integer (1 = highest). Combines uplift score, churn probability, and net ROI into a single action queue."],
+          ].map(([term, def]) => (
+            <div key={term} className="flex gap-2">
+              <span className="font-semibold text-[#4338CA] shrink-0">{term}:</span>
+              <span className="text-[#475569]">{def}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

@@ -10,6 +10,17 @@ Usage:
 Requires DATABASE_URL in environment or .env file.
 """
 import os, json, logging
+from pathlib import Path
+
+# Load .env file manually — no python-dotenv dependency needed
+_env_path = Path(__file__).parent / ".env"
+if _env_path.exists():
+    for line in _env_path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, val = line.partition("=")
+            os.environ.setdefault(key.strip(), val.strip())
+
 import pandas as pd
 import psycopg2
 from psycopg2.extras import execute_values

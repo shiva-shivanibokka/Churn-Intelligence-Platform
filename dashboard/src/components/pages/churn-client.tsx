@@ -132,7 +132,7 @@ export function ChurnClient({ customers }: Props) {
       {/* Probability distribution */}
       <SectionHeading>Churn Probability Distribution</SectionHeading>
       <div className="bg-[#FFF1F2] border border-[#FECDD3] rounded-xl px-4 py-2.5 mb-3 text-[13px] text-[#9F1239]">
-        How many customers fall into each risk bucket. <span className="font-semibold text-[#10B981]">Green bars (0–30%)</span> = safe, light-touch nurture. <span className="font-semibold text-[#F59E0B]">Amber (40–60%)</span> = watch list, monitor next 30 days. <span className="font-semibold text-[#F43F5E]">Red (70–100%)</span> = immediate intervention — these customers will cancel without action.
+        How many customers fall into each 10%-wide risk bucket. <span className="font-semibold text-[#10B981]">Green bars (0–40%)</span> = low risk, light-touch nurture. <span className="font-semibold text-[#F59E0B]">Amber (40–70%)</span> = medium risk, monitor closely. <span className="font-semibold text-[#F43F5E]">Red (70–100%)</span> = high risk, immediate intervention needed before they cancel.
       </div>
       <ChartCard>
         <ResponsiveContainer width="100%" height={420}>
@@ -199,6 +199,7 @@ export function ChurnClient({ customers }: Props) {
       <div className="h-8" />
 
       {/* Avg churn prob by segment */}
+
       <SectionHeading>Average Churn Probability by Segment</SectionHeading>
       <div className="bg-[#EEF2FF] border border-[#DDD6FE] rounded-xl px-4 py-2.5 mb-3 text-[13px] text-[#4338CA]">
         Compares the mean predicted churn probability across all 5 segments. Higher bar = higher urgency for that group. Use this to prioritise which segment to run your next retention campaign against.
@@ -225,6 +226,26 @@ export function ChurnClient({ customers }: Props) {
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
+
+      {/* Glossary */}
+      <div className="mt-8 bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl p-5">
+        <p className="text-[12px] font-bold uppercase tracking-wide text-[#64748B] mb-3">Parameter Glossary</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[13px]">
+          {[
+            ["Churn Probability", "The XGBoost model's predicted probability (0–100%) that a customer will leave. Each segment has its own model trained separately."],
+            ["Risk Tier", "Churn probability bucketed into three tiers: Low Risk (0–30%), Medium Risk (30–60%), High Risk (60–100%)."],
+            ["SHAP Value", "SHapley Additive exPlanations — measures how much each feature pushes the churn probability up or down for an individual customer. Positive = increases churn risk."],
+            ["Segment Filter", "Selecting a segment updates the probability histogram and SHAP chart to show only those customers. Use this to understand what drives churn within one group specifically."],
+            ["Complain", "Whether a customer has filed a complaint (1=yes, 0=no). One of the strongest churn predictors — unresolved complaints are a leading indicator of cancellation."],
+            ["SatisfactionScore", "Customer-reported satisfaction (1=best, 5=worst). Inverted in the SupportRiskScore composite feature."],
+          ].map(([term, def]) => (
+            <div key={term} className="flex gap-2">
+              <span className="font-semibold text-[#4338CA] shrink-0">{term}:</span>
+              <span className="text-[#475569]">{def}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
