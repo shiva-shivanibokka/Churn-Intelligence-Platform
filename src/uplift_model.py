@@ -189,8 +189,12 @@ def compute_uplift_scores_causalml(
         n_jobs=-1,
     )
     mask_t0 = T == 0
-    base_learner_0.fit(X[mask_t0], Y[mask_t0])
-    p_churn_control = base_learner_0.predict_proba(X)[:, 1]
+    if mask_t0.sum() == 0:
+        logger.warning("No control-group customers found — ChurnProbNoTreatment set to zero.")
+        p_churn_control = np.zeros(len(X))
+    else:
+        base_learner_0.fit(X[mask_t0], Y[mask_t0])
+        p_churn_control = base_learner_0.predict_proba(X)[:, 1]
 
     metrics = {
         "method": "T-Learner + S-Learner ensemble (CausalML)",

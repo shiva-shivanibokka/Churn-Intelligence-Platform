@@ -143,12 +143,16 @@ def train_segment_model(
         cross_val_score(base_clf, X, y, cv=cv, scoring="average_precision").mean()
     )
 
-    # Fit base model on the full train split
-    base_clf.fit(X, y)
+    # Fit base model on 80% of the train split; reserve 20% for calibration.
+    # Calibrating on the same data the model trained on inflates calibration
+    # quality (the model has already memorised those labels).
+    X_fit, X_calib, y_fit, y_calib = train_test_split(
+        X, y, test_size=0.20, random_state=123, stratify=y
+    )
+    base_clf.fit(X_fit, y_fit)
 
-    # Calibration: isotonic regression wraps the already-fitted base model
     calibrated_clf = CalibratedClassifierCV(base_clf, cv="prefit", method="isotonic")
-    calibrated_clf.fit(X, y)
+    calibrated_clf.fit(X_calib, y_calib)
 
     # ── Train-split evaluation (calibrated model) ────────────────────────────
     train_probs = calibrated_clf.predict_proba(X)[:, 1]
@@ -245,7 +249,7 @@ def train_segment_model(
 
     logger.info(
         "Segment '%s': CV AUC=%.3f | Holdout AUC=%.3f | Holdout Brier=%.3f | "
-        "n_train=%d, n_test=%d, churn_rate=%.2%%",
+        "n_train=%d, n_test=%d, churn_rate=%.2f%%",
         segment_name, cv_auc, holdout_auc, holdout_brier, len(y), len(y_test), y.mean() * 100,
     )
 

@@ -147,7 +147,8 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     # --- Recency Signal ---
     # Days since last order normalized. Higher = more lapsed.
     # Direct analog of Spotify's "days since last stream" leading indicator.
-    df["RecencySignal"] = df["DaySinceLastOrder"] / (df["DaySinceLastOrder"].max() + 1)
+    _max_days = df["DaySinceLastOrder"].max()
+    df["RecencySignal"] = df["DaySinceLastOrder"] / (_max_days if _max_days > 0 else 1)
 
     # --- Stickiness Index ---
     # Number of registered devices / number of addresses.
