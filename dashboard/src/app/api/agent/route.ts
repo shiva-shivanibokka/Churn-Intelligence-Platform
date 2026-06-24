@@ -9,7 +9,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-const MODEL = "llama-3.3-70b-versatile";
+const MODEL = "qwen-qwq-32b";
 const MAX_ROUNDS = 5;
 
 // ─── Tool definitions ──────────────────────────────────────────────────────────
@@ -192,6 +192,12 @@ const SYSTEM_CHAT = `You are an AI Customer Success Assistant. You help Customer
 
 // ─── ReAct loop ────────────────────────────────────────────────────────────────
 
+// qwen-qwq-32b is a reasoning model — it wraps internal thinking in <think>…</think>.
+// Strip that block before returning content to callers or storing in message history.
+function stripThinking(text: string): string {
+  return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+}
+
 async function runAgentLoop(
   messages: ChatCompletionMessageParam[],
   mode: "batch" | "chat"
@@ -205,20 +211,21 @@ async function runAgentLoop(
       messages: apiMessages,
       tools: TOOLS,
       tool_choice: "auto",
-      max_tokens: 1500,
+      max_tokens: 8000, // reasoning model needs more tokens for think + answer
     });
 
     const msg = completion.choices[0].message;
     const finish = completion.choices[0].finish_reason;
+    const cleanContent = stripThinking(msg.content ?? "");
 
     apiMessages.push({
       role: "assistant",
-      content: msg.content ?? "",
+      content: cleanContent,
       tool_calls: msg.tool_calls ?? undefined,
     } as ChatCompletionMessageParam);
 
     if (!msg.tool_calls || finish === "stop") {
-      return { response: msg.content ?? "", trace };
+      return { response: cleanContent, trace };
     }
 
     for (const tc of msg.tool_calls) {
@@ -240,9 +247,9 @@ async function runAgentLoop(
   const final = await groq.chat.completions.create({
     model: MODEL,
     messages: [...apiMessages, { role: "user", content: "Summarise findings and give a final recommendation now." }],
-    max_tokens: 800,
+    max_tokens: 2000,
   });
-  return { response: final.choices[0].message.content ?? "", trace };
+  return { response: stripThinking(final.choices[0].message.content ?? ""), trace };
 }
 
 // ─── Route handler ─────────────────────────────────────────────────────────────
