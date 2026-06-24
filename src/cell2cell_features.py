@@ -47,16 +47,18 @@ CREDIT_RATING_MAP = {
 
 def _find_csv(path: str) -> str:
     """Find the Cell2Cell CSV — handles different filenames from different sources."""
-    candidates = ["cell2cell.csv", "CELL2CELL.csv", "Cell2Cell.csv",
-                  "TRAIN.csv", "train.csv", "cell2celltrain.csv",
-                  "cell2cell_data.csv", "CellC2Cell2000.csv"]
+    candidates = [
+        "cell2celltrain.csv", "Cell2CellTrain.csv", "CELL2CELLTRAIN.csv",
+        "cell2cell_train.csv", "train.csv", "TRAIN.csv",
+        "cell2cell.csv", "Cell2Cell.csv", "cell2cell_data.csv",
+    ]
     for fname in candidates:
         fpath = os.path.join(path, fname)
         if os.path.exists(fpath):
             return fpath
-    # Fall back to first CSV in directory
-    for f in os.listdir(path):
-        if f.lower().endswith(".csv"):
+    # Fall back to first CSV that isn't the holdout (holdout has no Churn label)
+    for f in sorted(os.listdir(path)):
+        if f.lower().endswith(".csv") and "holdout" not in f.lower():
             return os.path.join(path, f)
     raise FileNotFoundError(
         f"No CSV found in {path}.\n"
@@ -213,8 +215,8 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # ── Behavioral composites (same formulas as features.py) ─────────────────
     df["EngagementScore"] = (
-        0.5 * (df["HourSpendOnApp"] / df["HourSpendOnApp"].max().clip(lower=1))
-        + 0.5 * (df["OrderCount"] / df["OrderCount"].max().clip(lower=1))
+        0.5 * (df["HourSpendOnApp"] / max(df["HourSpendOnApp"].max(), 1))
+        + 0.5 * (df["OrderCount"] / max(df["OrderCount"].max(), 1))
     )
 
     _max_days = df["DaySinceLastOrder"].max()
