@@ -452,9 +452,11 @@ def page_segmentation(df):
             st.plotly_chart(fig_conf, use_container_width=True)
             pct_certain = (confidence >= 0.80).mean()
             st.caption(
-                f"{pct_certain:.0%} of customers have ≥80% confidence in their segment — "
-                "the peak near 1.0 shows most customers have a clear behavioral home. "
-                "Customers below 0.80 sit on segment boundaries and may need manual review."
+                f"**{pct_certain:.0%} of customers score ≥80% confidence** — the large spike at 1.0 "
+                "is expected and correct: it means the 5 segments are very well-separated in behavioral space, "
+                "so GMM can place most customers into one segment with near-certainty. "
+                "This validates the segmentation quality. Customers below 0.80 sit on a boundary "
+                "between two segments and deserve closer manual review."
             )
 
 
@@ -824,10 +826,11 @@ def _render_action_card(action: dict, agentic_mode: bool, db_action_id: str = No
     uplift = action.get("uplift_score", 0)
     roi = action.get("net_roi", 0)
 
-    with st.expander(
-        f"Customer {cid} | {seg} | Churn: {churn_p:.1%} | Uplift: {uplift:+.3f} | ROI: ${roi:.0f}",
-        expanded=True,
-    ):
+    with st.container(border=True):
+        st.markdown(
+            f"**Customer {cid}** &nbsp;|&nbsp; {seg} &nbsp;|&nbsp; "
+            f"Churn: **{churn_p:.1%}** &nbsp;|&nbsp; Uplift: **{uplift:+.3f}** &nbsp;|&nbsp; ROI: **${roi:.0f}**"
+        )
         # Show agent reasoning trace if available
         trace = action.get("trace", [])
         if agentic_mode and trace:
@@ -1084,12 +1087,25 @@ def page_retention_actions(df):
     # ── Sidebar controls ─────────────────────────────────────────────────────
     st.sidebar.markdown("---")
     st.sidebar.subheader("Groq API Key")
-    api_key = st.sidebar.text_input(
-        "Groq API Key (free)",
+
+    # Read from Streamlit Secrets first, then environment, then text input
+    _secret_key = ""
+    try:
+        _secret_key = st.secrets.get("GROQ_API_KEY", "") or os.getenv("GROQ_API_KEY", "")
+    except Exception:
+        _secret_key = os.getenv("GROQ_API_KEY", "")
+
+    api_key_input = st.sidebar.text_input(
+        "Groq API Key",
         type="password",
-        placeholder="gsk_...",
-        help="Free at console.groq.com — required for LLM features",
+        placeholder="gsk_... (or set in Streamlit Secrets)",
+        help="Set GROQ_API_KEY in Streamlit Secrets to avoid pasting it here each session.",
     )
+    api_key = api_key_input or _secret_key
+
+    if _secret_key and not api_key_input:
+        st.sidebar.caption("✅ Key loaded from Secrets")
+
     avg_clv = st.sidebar.number_input("Customer Lifetime Value ($)", value=500, step=50)
     top_n = st.sidebar.slider("Batch: customers to generate", 1, 20, 5)
     agentic_mode = st.sidebar.toggle(
@@ -1100,39 +1116,20 @@ def page_retention_actions(df):
 
     playbook = load_playbook()
 
-    # ── No API key — show production workflow explainer ──────────────────────
-    if not api_key:
-        st.info(
-            "Enter your free Groq API key in the sidebar. "
-            "Get one at **console.groq.com** — 2 minutes, no credit card."
-        )
-        st.markdown("---")
-        st.markdown("### How this mirrors production (Salesforce / HubSpot pattern)")
-        st.markdown("""
-| Step | What happens | Tool |
-|------|-------------|------|
-| 1. Score | Churn model scores all customers nightly | XGBoost (this engine) |
-| 2. Filter | Only Persuadables passed downstream | Uplift model (this engine) |
-| 3. Generate | Agent calls tools, writes personalized plan | Llama 3.3 / GPT-4o |
-| 4. Review | CSM reviews and approves | Salesforce inbox / HubSpot task |
-| 5. Execute | Message sent via selected channel | Marketo / Outreach / Intercom |
-| 6. Track | Open rate, reply, churn outcome logged | CRM analytics |
-| 7. Feedback | Outcomes retrain the uplift model quarterly | MLOps pipeline |
-
-**Agentic mode** (toggle in sidebar) implements the tool-calling pattern used by Einstein Copilot:
-the model decides *what data to retrieve* via function calls rather than getting everything pre-stuffed into one prompt.
-The **AI Customer Assistant** tab adds a conversational layer — CSMs can ask questions before deciding whether to act.
-        """)
-        return
-
     # ── Tabs ─────────────────────────────────────────────────────────────────
     tab1, tab2 = st.tabs(["📋 Batch Generator", "💬 AI Customer Assistant"])
 
     with tab1:
-        _render_batch_tab(df, api_key, avg_clv, top_n, agentic_mode, playbook)
+        if not api_key:
+            st.warning("Add your Groq API key in the sidebar to generate retention plans. Get one free at console.groq.com.")
+        else:
+            _render_batch_tab(df, api_key, avg_clv, top_n, agentic_mode, playbook)
 
     with tab2:
-        _render_chat_tab(df, api_key, playbook)
+        if not api_key:
+            st.warning("Add your Groq API key in the sidebar to use the AI Customer Assistant.")
+        else:
+            _render_chat_tab(df, api_key, playbook)
 
 
 # ─── Page 5: Audit & Analytics ──────────────────────────────────────────────
@@ -1266,9 +1263,14 @@ def main():
         st.code("python src/pipeline.py")
         st.stop()
 
-    # Initialise DB (gracefully skips if DATABASE_URL not set)
+    # Initialise DB — try Streamlit Secrets first, then environment variable
     import database as db
-    db.initialize()
+    _db_url = ""
+    try:
+        _db_url = st.secrets.get("DATABASE_URL", "") or os.getenv("DATABASE_URL", "")
+    except Exception:
+        _db_url = os.getenv("DATABASE_URL", "")
+    db.initialize(database_url=_db_url or None)
 
     # Generate a stable session ID for this browser session
     if "session_id" not in st.session_state:
