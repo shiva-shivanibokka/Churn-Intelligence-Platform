@@ -39,20 +39,19 @@ Explainability approach:
 import logging
 import numpy as np
 import pandas as pd
-import xgboost as xgb
 import mlflow
-import mlflow.xgboost
+import mlflow.sklearn
 import joblib
 import os
 import json
 import warnings
+from catboost import CatBoostClassifier
 from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
-from sklearn.calibration import CalibratedClassifierCV, calibration_curve
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import (
     roc_auc_score,
     average_precision_score,
     brier_score_loss,
-    classification_report,
 )
 
 warnings.filterwarnings("ignore")
@@ -63,26 +62,30 @@ MODELS_PATH = os.path.join(os.path.dirname(__file__), "..", "models")
 PROCESSED_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "processed")
 
 
-def get_xgb_params() -> dict:
+def get_catboost_params(pos_weight: float = 5.0) -> dict:
     """
-    XGBoost hyperparameters tuned for imbalanced churn datasets.
-    scale_pos_weight handles the 16.8% churn rate (roughly 5:1 imbalance).
+    CatBoost hyperparameters tuned for imbalanced churn datasets.
+
+    Why CatBoost over XGBoost:
+    - Handles categorical features natively (no label encoding needed, though we still
+      pass integers — CatBoost works fine either way)
+    - Ordered boosting reduces overfitting on small segments without explicit subsampling
+    - scale_pos_weight equivalent: class_weights = {0: 1, 1: pos_weight}
+    - No need for use_label_encoder or eval_metric hacks
     """
     return {
-        "n_estimators": 300,
-        "max_depth": 5,
+        "iterations": 500,
+        "depth": 6,
         "learning_rate": 0.05,
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "min_child_weight": 3,
-        "gamma": 0.1,
-        "reg_alpha": 0.1,
-        "reg_lambda": 1.0,
-        "scale_pos_weight": 5,  # approximate churn imbalance ratio
-        "use_label_encoder": False,
-        "eval_metric": "auc",
-        "random_state": 42,
-        "n_jobs": -1,
+        "l2_leaf_reg": 3.0,
+        "random_strength": 1.0,
+        "bagging_temperature": 0.5,
+        "border_count": 128,
+        "class_weights": [1.0, pos_weight],
+        "eval_metric": "AUC",
+        "random_seed": 42,
+        "verbose": 0,
+        "thread_count": -1,
     }
 
 
@@ -128,13 +131,12 @@ def train_segment_model(
         X_all, y_all, test_size=0.20, random_state=42, stratify=y_all
     )
 
-    params = get_xgb_params()
-    # Recompute scale_pos_weight per segment (churn rates differ by segment)
+    # Recompute class weight per segment (churn rates differ by segment)
     neg, pos = (y == 0).sum(), (y == 1).sum()
-    if pos > 0:
-        params["scale_pos_weight"] = max(1, neg / pos)
+    pos_weight = max(1.0, neg / pos) if pos > 0 else 5.0
+    params = get_catboost_params(pos_weight)
 
-    base_clf = xgb.XGBClassifier(**params)
+    base_clf = CatBoostClassifier(**params)
 
     # Cross-validated metrics on the TRAIN split only (5-fold stratified)
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
@@ -172,18 +174,10 @@ def train_segment_model(
     probs = train_probs
     brier = train_brier
 
-    # Fast SHAP via XGBoost native gain-based feature importance.
-    # This is the standard production approach when per-customer SHAP is
-    # too slow to compute at inference time (which is the case here with
-    # PermutationExplainer on 1000+ row segments).
-    # TreeExplainer base_score bug in XGBoost 3.x means we use gain importance
-    # as the global signal, and deviation-weighted approximation per customer.
-    importance_dict = base_clf.get_booster().get_score(importance_type="gain")
-    # Align to feature_cols order, fill 0 for unused features
-    mean_abs_shap = pd.Series(
-        {feat: importance_dict.get(feat, 0.0) for feat in feature_cols},
-        index=feature_cols,
-    ).sort_values(ascending=False)
+    # CatBoost native feature importance (PredictionValuesChange — equivalent to XGBoost gain).
+    # Returns a numpy array aligned to feature_cols order.
+    importance_arr = base_clf.get_feature_importance()
+    mean_abs_shap = pd.Series(importance_arr, index=feature_cols).sort_values(ascending=False)
 
     # Normalize to [0,1] range for interpretability
     max_val = mean_abs_shap.max()
@@ -245,7 +239,7 @@ def train_segment_model(
             for feat, val in mean_abs_shap.head(5).items():
                 mlflow.log_metric(f"importance_{feat}", float(val))
 
-            mlflow.xgboost.log_model(base_clf, name=f"model_{segment_name}")
+            mlflow.sklearn.log_model(base_clf, name=f"model_{segment_name}")
 
     logger.info(
         "Segment '%s': CV AUC=%.3f | Holdout AUC=%.3f | Holdout Brier=%.3f | "

@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from logging_config import configure_logging
 from features import build_pipeline, get_feature_sets
+from olist_features import build_olist_pipeline, get_olist_feature_sets
 from segmentation import run_segmentation
 from churn_model import run_churn_pipeline
 from uplift_model import run_uplift_pipeline
@@ -29,7 +30,7 @@ PROCESSED_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "processe
 MODELS_PATH = os.path.join(os.path.dirname(__file__), "..", "models")
 
 
-def run_full_pipeline(force_retrain: bool = False) -> dict:
+def run_full_pipeline(force_retrain: bool = False, dataset: str = "ecommerce") -> dict:
     """
     Run all 5 stages of the decision intelligence pipeline.
 
@@ -63,13 +64,17 @@ def run_full_pipeline(force_retrain: bool = False) -> dict:
         }
 
     logger.info("=" * 60)
-    logger.info("CUSTOMER SEGMENTATION & CHURN ENGINE — FULL PIPELINE")
+    logger.info("CUSTOMER SEGMENTATION & CHURN ENGINE — FULL PIPELINE [dataset=%s]", dataset)
     logger.info("=" * 60)
 
     # Stage 1: Feature Engineering
     logger.info("[Stage 1] Feature Engineering")
-    feature_sets = get_feature_sets()
-    df = build_pipeline(save=True)
+    if dataset == "olist":
+        feature_sets = get_olist_feature_sets()
+        df = build_olist_pipeline(save=True)
+    else:
+        feature_sets = get_feature_sets()
+        df = build_pipeline(save=True)
 
     # Stage 2: Segmentation — skip if cached segmented.parquet exists
     if (
@@ -136,9 +141,11 @@ if __name__ == "__main__":
     configure_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true", help="Force retrain all models")
+    parser.add_argument("--dataset", choices=["ecommerce", "olist"], default="ecommerce",
+                        help="Dataset to use: 'ecommerce' (original) or 'olist' (Brazilian e-commerce, ~96K customers)")
     args = parser.parse_args()
 
-    results = run_full_pipeline(force_retrain=args.force)
+    results = run_full_pipeline(force_retrain=args.force, dataset=args.dataset)
     df = results["df"]
 
     logger.info("=" * 60)
