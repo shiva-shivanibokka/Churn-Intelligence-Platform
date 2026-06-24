@@ -153,6 +153,42 @@ def render_sidebar(df):
     return page
 
 
+# ─── UMAP caption lookup (changes dynamically with Colour by dropdown) ───────
+_UMAP_CAPTIONS = {
+    "Segment": (
+        "Each dot is one customer. Dots close together behave similarly — "
+        "similar purchase frequency, spend, engagement, and recency. "
+        "Colors show the 5 behavioral segments discovered by K-Means++."
+    ),
+    "Churn": (
+        "Red dots represent customers who actually churned; blue stayed. "
+        "Dense red clusters reveal which behavioral regions carry the highest "
+        "real-world churn concentration."
+    ),
+    "RiskTier": (
+        "Green = Low Risk · Orange = Medium Risk · Red = High Risk. "
+        "Customers in red zones are the highest priority for retention intervention."
+    ),
+    "CustomerType": (
+        "Green = Persuadable (target for intervention) · Blue = Sure Thing (stays anyway) · "
+        "Red = Lost Cause (won't respond to intervention) · Gray = Sleeping Dog (do not contact — "
+        "intervention may trigger churn)."
+    ),
+    "EngagementScore": (
+        "Darker red = less engaged customer. Disengaged clusters overlapping with "
+        "churned customers confirm that falling engagement is a leading churn indicator."
+    ),
+    "ChurnProbability": (
+        "Darker red = higher predicted churn probability from the XGBoost model. "
+        "Compare this view with Segment view to see which cohorts carry the most model-predicted risk."
+    ),
+    "UpliftScore": (
+        "Green = high uplift (responds to intervention) · Red = low/negative uplift (won't respond). "
+        "Only customers in green zones have positive expected ROI from a retention campaign."
+    ),
+}
+
+
 # ─── Page 1: Segmentation Explorer ──────────────────────────────────────────
 def page_segmentation(df):
     st.title("Customer Segmentation Explorer")
@@ -162,6 +198,16 @@ def page_segmentation(df):
         "and visualized in 2D using **UMAP**. Segment stability is validated via "
         "**bootstrap Adjusted Rand Index** across 100 resamplings — the same "
         "validation approach used in production ML systems."
+    )
+    st.info(
+        "**What are these charts?** These are NOT geographic maps. "
+        "**UMAP** (Uniform Manifold Approximation and Projection) is a mathematical technique that "
+        "takes 13 behavioral features per customer — purchase frequency, spend trends, "
+        "satisfaction scores, app engagement — and compresses them into a 2D scatter plot "
+        "so you can visually see which customers behave similarly. "
+        "Companies like Netflix, Spotify, and Uber use UMAP to visualize customer segments. "
+        "The X and Y axes have no real-world label — they represent behavioral distance in feature space.",
+        icon="ℹ️",
     )
 
     stability = load_stability()
@@ -181,7 +227,7 @@ def page_segmentation(df):
     col_left, col_right = st.columns([2, 1])
 
     with col_left:
-        st.subheader("UMAP Cluster Visualization")
+        st.subheader("Customer Behavioral Space (2D Projection)")
         color_by = st.selectbox(
             "Colour by",
             [
@@ -251,11 +297,22 @@ def page_segmentation(df):
             )
 
         fig.update_traces(marker=dict(size=4))
-        fig.update_layout(height=500, template="plotly_white")
-        st.plotly_chart(fig, use_container_width=True)
+        fig.update_layout(
+            height=500,
+            template="plotly_white",
+            paper_bgcolor="#FAFAFA",
+            margin=dict(l=10, r=10, t=40, b=10),
+        )
+        with st.container(border=True):
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(_UMAP_CAPTIONS.get(color_by, ""))
 
     with col_right:
-        st.subheader("Bootstrap Stability")
+        st.subheader("Segment Stability Score")
+        st.caption(
+            "Tests whether the same 5 segments emerge from 100 different random "
+            "data samples — proving the clusters are real, not a random artifact."
+        )
         if stability:
             ari = stability["mean_ari"]
             grade = stability["grade"]
@@ -266,7 +323,7 @@ def page_segmentation(df):
             st.metric(
                 "Mean ARI",
                 f"{ari:.3f}",
-                help="Adjusted Rand Index across 100 bootstrap resamplings",
+                help="Adjusted Rand Index across 100 bootstrap resamplings. Above 0.70 = stable.",
             )
             st.metric("Std ARI", f"{stability['std_ari']:.3f}")
             st.metric("Stability Grade", grade)
@@ -277,7 +334,7 @@ def page_segmentation(df):
                     x=ari_scores,
                     nbins=20,
                     labels={"x": "ARI Score"},
-                    title="ARI Distribution (100 bootstraps)",
+                    title="Stability Score Distribution (100 bootstraps)",
                     color_discrete_sequence=[color],
                 )
                 fig_ari.add_vline(
@@ -287,17 +344,17 @@ def page_segmentation(df):
                     annotation_text=f"Mean={ari:.3f}",
                 )
                 fig_ari.update_layout(
-                    height=280, template="plotly_white", showlegend=False
+                    height=260,
+                    template="plotly_white",
+                    showlegend=False,
+                    paper_bgcolor="#FAFAFA",
                 )
-                st.plotly_chart(fig_ari, use_container_width=True)
-
-            st.info(
-                "**What is Bootstrap ARI?**\n\n"
-                "Bootstrap stability tests whether the same customer segments "
-                "emerge from different random samples of the data. ARI > 0.70 "
-                "means the segments are consistent — not an artifact of one "
-                "random seed. This is a production-grade validation step."
-            )
+                with st.container(border=True):
+                    st.plotly_chart(fig_ari, use_container_width=True)
+                    st.caption(
+                        "A tight distribution near 1.0 means the segments are highly reproducible. "
+                        "ARI = 1.0 is a perfect match; ARI > 0.85 is production-grade stability."
+                    )
         else:
             st.warning("Stability data not available. Run pipeline first.")
 
@@ -305,6 +362,11 @@ def page_segmentation(df):
 
     # ── Segment Profiles Heatmap ─────────────────────────────────────────────
     st.subheader("Segment Behavioral Profiles")
+    st.caption(
+        "Each row is a behavioral metric; each column is a segment. "
+        "Darker red = higher value. The ChurnRate row shows actual observed churn — "
+        "use this to understand which segments are most at risk and why."
+    )
     profiles = build_segment_profiles(df)
 
     heat_cols = [
@@ -322,34 +384,66 @@ def page_segmentation(df):
     fig_heat = px.imshow(
         heat_data.T,
         color_continuous_scale="RdYlGn_r",
-        title="Segment Profile Heatmap (darker red = higher value)",
+        title="Segment Profile Heatmap — darker red = higher value for that metric",
         text_auto=".2f",
         aspect="auto",
     )
-    fig_heat.update_layout(height=400, template="plotly_white")
-    st.plotly_chart(fig_heat, use_container_width=True)
+    fig_heat.update_layout(
+        height=400,
+        template="plotly_white",
+        paper_bgcolor="#FAFAFA",
+        margin=dict(l=10, r=10, t=40, b=10),
+    )
+    with st.container(border=True):
+        st.plotly_chart(fig_heat, use_container_width=True)
 
-    # ── GMM Soft Probabilities ───────────────────────────────────────────────
-    st.subheader("GMM Soft Segment Probabilities")
-    st.markdown(
-        "Unlike K-Means (hard assignment), GMM assigns each customer a **probability "
-        "distribution across all segments**. A customer who is '60% At-Risk, 30% Lapsed' "
-        "is treated differently from one who is '95% At-Risk'. This is the approach "
-        "used in production for ambiguous health score boundaries."
+    # ── GMM Segment Confidence ───────────────────────────────────────────────
+    st.subheader("Segment Assignment Confidence")
+    st.caption(
+        "K-Means forces every customer into exactly one segment. "
+        "GMM (Gaussian Mixture Models) goes further — it gives each customer a confidence score "
+        "for their assigned segment. A score near 1.0 means the model is highly certain "
+        "about where this customer belongs; a score near 0.5 means they sit on the boundary "
+        "between two segments and need closer attention."
     )
     gmm_cols = [c for c in df.columns if c.startswith("GMM_Prob_Seg")]
     if gmm_cols:
-        sample_df = df.sample(min(500, len(df)), random_state=42)
-        fig_gmm = px.bar(
-            sample_df[["Segment"] + gmm_cols].sort_values("Segment"),
-            x=sample_df.index[: len(sample_df)],
-            y=gmm_cols,
-            color_discrete_sequence=list(SEGMENT_COLORS.values()),
-            title="GMM Soft Assignment Probabilities (sample of 500 customers)",
-            labels={"value": "Probability", "variable": "Segment"},
+        # Confidence = max GMM probability across all segments for each customer
+        confidence = df[gmm_cols].max(axis=1)
+        conf_df = pd.DataFrame({"Confidence": confidence, "Segment": df["Segment"]})
+
+        fig_conf = px.histogram(
+            conf_df,
+            x="Confidence",
+            color="Segment",
+            color_discrete_map=SEGMENT_COLORS,
+            nbins=30,
+            barmode="overlay",
+            opacity=0.75,
+            title="How confident is the model about each customer's segment assignment?",
+            labels={"Confidence": "Assignment Confidence (0 = uncertain, 1 = certain)"},
         )
-        fig_gmm.update_layout(height=300, template="plotly_white", barmode="stack")
-        st.plotly_chart(fig_gmm, use_container_width=True)
+        fig_conf.add_vline(
+            x=0.80,
+            line_dash="dash",
+            line_color="black",
+            annotation_text="80% confidence",
+            annotation_position="top right",
+        )
+        fig_conf.update_layout(
+            height=340,
+            template="plotly_white",
+            paper_bgcolor="#FAFAFA",
+            margin=dict(l=10, r=10, t=50, b=10),
+        )
+        with st.container(border=True):
+            st.plotly_chart(fig_conf, use_container_width=True)
+            pct_certain = (confidence >= 0.80).mean()
+            st.caption(
+                f"{pct_certain:.0%} of customers have ≥80% confidence in their segment — "
+                "the peak near 1.0 shows most customers have a clear behavioral home. "
+                "Customers below 0.80 sit on segment boundaries and may need manual review."
+            )
 
 
 # ─── Page 2: Churn Risk Dashboard ───────────────────────────────────────────
@@ -366,6 +460,11 @@ def page_churn_risk(df):
 
     # ── Model Performance ───────────────────────────────────────────────────
     st.subheader("Per-Segment Model Performance")
+    st.caption(
+        "A separate XGBoost model was trained for each customer segment. "
+        "CV AUC measures how well the model separates churners from non-churners (1.0 = perfect, 0.5 = random). "
+        "Brier Score measures probability calibration quality — lower is better."
+    )
     metrics_data = []
     for seg, model_dict in seg_models.items():
         if model_dict and "metrics" in model_dict:
@@ -393,6 +492,11 @@ def page_churn_risk(df):
 
     with col1:
         st.subheader("Churn Probability Distribution")
+        st.caption(
+            "Bars show how many customers fall at each predicted churn probability. "
+            "A spike near 1.0 means the model is confidently identifying high-risk customers. "
+            "Filter by segment to see the risk distribution for individual cohorts."
+        )
         seg_filter = st.multiselect(
             "Filter by segment",
             df["Segment"].unique().tolist(),
@@ -411,11 +515,19 @@ def page_churn_risk(df):
             title="Calibrated Churn Probability by Segment",
             labels={"ChurnProbability": "Churn Probability"},
         )
-        fig_hist.update_layout(height=380, template="plotly_white")
-        st.plotly_chart(fig_hist, use_container_width=True)
+        fig_hist.update_layout(
+            height=380, template="plotly_white", paper_bgcolor="#FAFAFA"
+        )
+        with st.container(border=True):
+            st.plotly_chart(fig_hist, use_container_width=True)
 
     with col2:
         st.subheader("Risk Tier Breakdown")
+        st.caption(
+            "Customers are bucketed into Low / Medium / High Risk based on their predicted "
+            "churn probability. High Risk = churn probability above 60%. "
+            "Use this to size your retention budget by segment."
+        )
         risk_seg = (
             df_filtered.groupby(["Segment", "RiskTier"])
             .size()
@@ -430,17 +542,21 @@ def page_churn_risk(df):
             title="Risk Tier Distribution by Segment",
             barmode="group",
         )
-        fig_risk.update_layout(height=380, template="plotly_white")
-        st.plotly_chart(fig_risk, use_container_width=True)
+        fig_risk.update_layout(
+            height=380, template="plotly_white", paper_bgcolor="#FAFAFA"
+        )
+        with st.container(border=True):
+            st.plotly_chart(fig_risk, use_container_width=True)
 
     st.markdown("---")
 
     # ── SHAP Feature Importance per Segment ─────────────────────────────────
-    st.subheader("Feature Importance by Segment (Gain-Based SHAP Proxy)")
-    st.markdown(
-        "XGBoost gain-based feature importance — normalized per segment. "
-        "Different segments have different churn drivers, which is why per-segment "
-        "models outperform a single global model."
+    st.subheader("Top Churn Drivers by Segment")
+    st.caption(
+        "This chart answers: 'Why is this segment churning?' — not just 'Who is churning?'. "
+        "Each bar shows how much a feature contributes to the churn prediction for the selected segment. "
+        "Different segments churn for different reasons, which is why one global model performs worse "
+        "than 5 dedicated segment models."
     )
     selected_seg = st.selectbox("Select segment", list(seg_models.keys()))
     if selected_seg in seg_models and seg_models[selected_seg]:
@@ -456,18 +572,42 @@ def page_churn_risk(df):
             orientation="h",
             color="Importance",
             color_continuous_scale="Reds",
-            title=f"Top Feature Importance — {selected_seg} Segment",
+            title=f"Top Churn Drivers — {selected_seg} Segment",
         )
         fig_shap.update_layout(
-            height=400, template="plotly_white", yaxis=dict(autorange="reversed")
+            height=400,
+            template="plotly_white",
+            yaxis=dict(autorange="reversed"),
+            paper_bgcolor="#FAFAFA",
         )
-        st.plotly_chart(fig_shap, use_container_width=True)
+        with st.container(border=True):
+            st.plotly_chart(fig_shap, use_container_width=True)
 
     st.markdown("---")
 
-    # ── High-Risk Customer Table ─────────────────────────────────────────────
-    st.subheader("High-Risk Customers")
-    high_risk = df[df["RiskTier"] == "High Risk"].nlargest(50, "ChurnProbability")
+    # ── Customer Risk Table ──────────────────────────────────────────────────
+    st.subheader("Customer Risk Table")
+    st.caption(
+        "All customers ranked by predicted churn probability. "
+        "Use the filters to drill into specific risk tiers or segments. "
+        "In a production CRM (Salesforce, HubSpot), this list would feed directly "
+        "into a campaign queue for the retention team."
+    )
+
+    table_col1, table_col2 = st.columns(2)
+    with table_col1:
+        risk_tier_filter = st.multiselect(
+            "Filter by Risk Tier",
+            ["High Risk", "Medium Risk", "Low Risk"],
+            default=["High Risk", "Medium Risk"],
+        )
+    with table_col2:
+        show_n = st.slider("Rows to display", min_value=25, max_value=500, value=100, step=25)
+
+    table_df = df_filtered[df_filtered["RiskTier"].isin(risk_tier_filter)].nlargest(
+        show_n, "ChurnProbability"
+    )
+
     display_cols = [
         "CustomerID",
         "Segment",
@@ -480,15 +620,16 @@ def page_churn_risk(df):
         "SatisfactionScore",
         "Complain",
     ]
-    display_cols = [c for c in display_cols if c in high_risk.columns]
+    display_cols = [c for c in display_cols if c in table_df.columns]
 
     st.dataframe(
-        high_risk[display_cols]
+        table_df[display_cols]
         .reset_index(drop=True)
         .style.background_gradient(subset=["ChurnProbability"], cmap="Reds"),
         use_container_width=True,
-        height=400,
+        height=420,
     )
+    st.caption(f"Showing {len(table_df):,} customers · sorted by churn probability descending")
 
 
 # ─── Page 3: Uplift Intelligence ────────────────────────────────────────────
@@ -703,18 +844,39 @@ def page_retention_actions(df):
 
     st.markdown("---")
 
-    # ── Generate Actions ─────────────────────────────────────────────────────
-    if st.button("Generate Retention Actions", type="primary", disabled=not api_key):
-        if not api_key:
-            st.error("Please enter your Anthropic API key in the sidebar.")
-            return
+    # ── How this works in production ─────────────────────────────────────────
+    if not api_key:
+        st.info(
+            "Enter your free Groq API key in the sidebar to generate retention action plans. "
+            "Get one at **console.groq.com** — takes 2 minutes, no credit card required."
+        )
+        st.markdown("---")
+        st.markdown("### How this works in production (Salesforce / HubSpot pattern)")
+        st.markdown(
+            """
+| Step | What happens | Tool used |
+|------|-------------|-----------|
+| 1. Score | Churn model scores all customers nightly | XGBoost (this engine) |
+| 2. Filter | Only Persuadables are passed downstream | Uplift model (this engine) |
+| 3. Generate | LLM writes a personalized intervention plan per customer | Llama 3.3 / GPT-4 |
+| 4. Review | A CSM (Customer Success Manager) reviews and approves | Salesforce inbox / HubSpot task |
+| 5. Execute | Approved message is sent via the selected channel | Marketo / Outreach / Intercom |
+| 6. Track | Open rate, reply rate, and churn outcome are logged | CRM analytics |
+| 7. Feedback | Logged outcomes retrain the uplift model quarterly | MLOps pipeline |
 
+This page implements Steps 1–3. Steps 4–7 would connect to a CRM via API in a production system.
+            """
+        )
+        return
+
+    # ── Generate Actions ─────────────────────────────────────────────────────
+    if st.button("Generate Retention Actions", type="primary"):
         from retention_llm import generate_batch_retention_actions
 
         seg_profiles = build_segment_profiles(df)
 
         with st.spinner(
-            f"Generating retention actions for {top_n} customers via Claude..."
+            f"Generating {top_n} retention action plans via Llama 3.3 (Groq)..."
         ):
             actions = generate_batch_retention_actions(
                 df_uplift=persuadables,
@@ -725,6 +887,35 @@ def page_retention_actions(df):
             )
 
         st.success(f"Generated {len(actions)} retention action plans.")
+
+        # ── CSV Export (mirrors CRM handoff in production) ───────────────────
+        export_rows = []
+        for a in actions:
+            export_rows.append({
+                "CustomerID": a.get("customer_id"),
+                "Segment": a.get("segment"),
+                "ChurnProbability": a.get("churn_probability"),
+                "UpliftScore": a.get("uplift_score"),
+                "NetROI": a.get("net_roi"),
+                "InterventionType": a.get("intervention_type"),
+                "Channel": a.get("channel"),
+                "Timing": a.get("timing"),
+                "Cost": a.get("intervention_cost_estimate"),
+                "Confidence": a.get("confidence"),
+                "WhyAtRisk": a.get("primary_risk_reason"),
+                "WillRespond": a.get("customer_receptivity"),
+                "SuggestedMessage": a.get("message_framing"),
+                "ExpectedOutcome": a.get("expected_outcome"),
+            })
+        export_df = pd.DataFrame(export_rows)
+        st.download_button(
+            label="Export to CSV (CRM handoff)",
+            data=export_df.to_csv(index=False).encode("utf-8"),
+            file_name="retention_actions.csv",
+            mime="text/csv",
+            help="Download this file to import into Salesforce, HubSpot, or Marketo",
+        )
+
         st.markdown("---")
 
         for action in actions:
@@ -742,7 +933,9 @@ def page_retention_actions(df):
                 if action.get("error"):
                     st.error(f"Error: {action['error']}")
                 elif action.get("do_not_intervene_reason"):
-                    st.warning(f"No intervention: {action['do_not_intervene_reason']}")
+                    st.warning(
+                        f"No intervention recommended: {action['do_not_intervene_reason']}"
+                    )
                 else:
                     col1, col2, col3 = st.columns(3)
                     col1.metric("Intervention", action.get("intervention_type", "N/A"))
@@ -750,45 +943,16 @@ def page_retention_actions(df):
                     col3.metric("Timing", action.get("timing", "N/A"))
 
                     col4, col5 = st.columns(2)
-                    col4.metric("Cost", action.get("intervention_cost_estimate", "N/A"))
-                    col5.metric("Confidence", action.get("confidence", "N/A"))
+                    col4.metric("Estimated Cost", action.get("intervention_cost_estimate", "N/A"))
+                    col5.metric("Model Confidence", action.get("confidence", "N/A"))
 
-                    st.markdown(
-                        f"**Why at risk:** {action.get('primary_risk_reason', '')}"
-                    )
-                    st.markdown(
-                        f"**Will they respond?** {action.get('customer_receptivity', '')}"
-                    )
-                    st.info(
-                        f"**Suggested Message:**\n\n{action.get('message_framing', '')}"
-                    )
-                    st.markdown(
-                        f"**Expected outcome:** {action.get('expected_outcome', '')}"
-                    )
+                    st.markdown(f"**Why at risk:** {action.get('primary_risk_reason', '')}")
+                    st.markdown(f"**Will they respond?** {action.get('customer_receptivity', '')}")
 
-    elif not api_key:
-        st.info(
-            "Enter your Groq API key in the sidebar to generate "
-            "LLM-powered retention action plans for each at-risk customer. "
-            "Get a free key at console.groq.com."
-        )
+                    st.markdown("**Suggested Message** *(copy-paste ready for CSM)*")
+                    st.code(action.get("message_framing", ""), language=None)
 
-        # Show example output when no key provided
-        st.markdown("### Example Output Preview")
-        st.markdown("""
-**Intervention:** Loyalty Reward
-**Channel:** In-App Notification | **Timing:** Immediate
-**Cost:** Low ($1-5) | **Confidence:** High
-
-**Why at risk:** Customer has not placed an order in 18 days and app engagement has declined 60% from prior period.
-
-**Will they respond?** High probability — customer has responded to in-app promotions in the past and has a 3-year tenure indicating brand affinity.
-
-**Suggested Message:**
-> "We noticed you haven't visited us lately — and we miss you! As a valued customer, you've unlocked exclusive access to this week's top deals. Plus, we've added 200 bonus loyalty points to your account."
-
-**Expected outcome:** 35-45% probability of re-engagement within 72 hours based on historical response patterns for this segment.
-        """)
+                    st.markdown(f"**Expected outcome:** {action.get('expected_outcome', '')}")
 
 
 # ─── Main App ────────────────────────────────────────────────────────────────
