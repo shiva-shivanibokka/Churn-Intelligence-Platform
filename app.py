@@ -546,85 +546,85 @@ def page_segmentation(df):
 
     # ── UMAP Scatter — full width ────────────────────────────────────────────
     st.subheader("Customer Behavioral Space (2D Projection)")
-        color_by = st.selectbox(
-            "Colour by",
-            [
-                "Segment",
-                "Churn",
-                "RiskTier",
-                "CustomerType",
-                "EngagementScore",
-                "ChurnProbability",
-                "UpliftScore",
-            ],
-            index=0,
+    color_by = st.selectbox(
+        "Colour by",
+        [
+            "Segment",
+            "Churn",
+            "RiskTier",
+            "CustomerType",
+            "EngagementScore",
+            "ChurnProbability",
+            "UpliftScore",
+        ],
+        index=0,
+    )
+
+    if color_by == "Segment":
+        fig = px.scatter(
+            df,
+            x="UMAP_1",
+            y="UMAP_2",
+            color="Segment",
+            color_discrete_map=SEGMENT_COLORS,
+            opacity=0.7,
+            hover_data=["CustomerID", "Churn", "ChurnProbability"],
+            title="Customer Behavioral Space (UMAP 2D)",
+        )
+    elif color_by in ["EngagementScore", "ChurnProbability", "UpliftScore"]:
+        fig = px.scatter(
+            df,
+            x="UMAP_1",
+            y="UMAP_2",
+            color=color_by,
+            color_continuous_scale="RdYlGn_r",
+            opacity=0.7,
+            hover_data=["CustomerID", "Segment"],
+            title=f"Customer Behavioral Space — coloured by {color_by}",
+        )
+    elif color_by == "RiskTier":
+        fig = px.scatter(
+            df,
+            x="UMAP_1",
+            y="UMAP_2",
+            color="RiskTier",
+            color_discrete_map=RISK_COLORS,
+            opacity=0.7,
+            hover_data=["CustomerID", "Segment", "ChurnProbability"],
+            title="Customer Behavioral Space — coloured by Risk Tier",
+        )
+    elif color_by == "CustomerType":
+        fig = px.scatter(
+            df,
+            x="UMAP_1",
+            y="UMAP_2",
+            color="CustomerType",
+            color_discrete_map=CUSTOMER_TYPE_COLORS,
+            opacity=0.7,
+            hover_data=["CustomerID", "Segment"],
+            title="Customer Behavioral Space — coloured by Customer Type",
+        )
+    else:
+        fig = px.scatter(
+            df,
+            x="UMAP_1",
+            y="UMAP_2",
+            color=color_by,
+            opacity=0.7,
+            title=f"UMAP — {color_by}",
         )
 
-        if color_by == "Segment":
-            fig = px.scatter(
-                df,
-                x="UMAP_1",
-                y="UMAP_2",
-                color="Segment",
-                color_discrete_map=SEGMENT_COLORS,
-                opacity=0.7,
-                hover_data=["CustomerID", "Churn", "ChurnProbability"],
-                title="Customer Behavioral Space (UMAP 2D)",
-            )
-        elif color_by in ["EngagementScore", "ChurnProbability", "UpliftScore"]:
-            fig = px.scatter(
-                df,
-                x="UMAP_1",
-                y="UMAP_2",
-                color=color_by,
-                color_continuous_scale="RdYlGn_r",
-                opacity=0.7,
-                hover_data=["CustomerID", "Segment"],
-                title=f"Customer Behavioral Space — coloured by {color_by}",
-            )
-        elif color_by == "RiskTier":
-            fig = px.scatter(
-                df,
-                x="UMAP_1",
-                y="UMAP_2",
-                color="RiskTier",
-                color_discrete_map=RISK_COLORS,
-                opacity=0.7,
-                hover_data=["CustomerID", "Segment", "ChurnProbability"],
-                title="Customer Behavioral Space — coloured by Risk Tier",
-            )
-        elif color_by == "CustomerType":
-            fig = px.scatter(
-                df,
-                x="UMAP_1",
-                y="UMAP_2",
-                color="CustomerType",
-                color_discrete_map=CUSTOMER_TYPE_COLORS,
-                opacity=0.7,
-                hover_data=["CustomerID", "Segment"],
-                title="Customer Behavioral Space — coloured by Customer Type",
-            )
-        else:
-            fig = px.scatter(
-                df,
-                x="UMAP_1",
-                y="UMAP_2",
-                color=color_by,
-                opacity=0.7,
-                title=f"UMAP — {color_by}",
-            )
-
-        fig.update_traces(marker=dict(size=5, line=dict(width=0.3, color='white')))
-        fig.update_layout(
-            height=620,
-            template="plotly_white", font=dict(family="Inter, sans-serif", color="#334155"),
-            paper_bgcolor="#FFFFFF",
-            margin=dict(l=20, r=20, t=50, b=20),
-            legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0),
-        )
-        with st.container(border=True):
-            st.plotly_chart(fig, use_container_width=True)
-            st.caption(_UMAP_CAPTIONS.get(color_by, ""))
+    fig.update_traces(marker=dict(size=5, line=dict(width=0.3, color='white')))
+    fig.update_layout(
+        height=620,
+        template="plotly_white", font=dict(family="Inter, sans-serif", color="#334155"),
+        paper_bgcolor="#FFFFFF",
+        margin=dict(l=20, r=20, t=50, b=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0),
+    )
+    with st.container(border=True):
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(_UMAP_CAPTIONS.get(color_by, ""))
 
     st.markdown("---")
 
