@@ -40,7 +40,12 @@ def initialize(database_url: Optional[str] = None) -> bool:
         logger.info("DATABASE_URL not configured — running without persistence.")
         return False
 
+    # Embed sslmode=require in the URL — more portable than a keyword arg
+    if "sslmode" not in url:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}sslmode=require"
     _DATABASE_URL = url
+
     try:
         import psycopg2  # imported here so missing package doesn't crash the app
         with _get_conn() as conn:
@@ -53,9 +58,21 @@ def initialize(database_url: Optional[str] = None) -> bool:
         _db_available = False
         return False
     except Exception as e:
-        logger.warning("Database unavailable (%s: %s) — running without persistence.", type(e).__name__, e)
-        _db_available = False
-        return False
+        logger.warning(
+            "Database unavailable (%s: %s) — running without persistence.",
+            type(e).__name__, e,
+        )
+        # Try once more without SSL in case this is a local dev environment
+        try:
+            _DATABASE_URL = url.replace("&sslmode=require", "").replace("?sslmode=require", "")
+            with _get_conn() as conn:
+                _create_schema(conn)
+            _db_available = True
+            logger.info("Database connected (no SSL) and schema initialised.")
+            return True
+        except Exception:
+            _db_available = False
+            return False
 
 
 def is_available() -> bool:
@@ -65,9 +82,7 @@ def is_available() -> bool:
 @contextmanager
 def _get_conn():
     import psycopg2
-    # Supabase (both Direct and Session Pooler) requires SSL.
-    # Pass sslmode explicitly so the connection works from cloud environments.
-    conn = psycopg2.connect(_DATABASE_URL, connect_timeout=10, sslmode="require")
+    conn = psycopg2.connect(_DATABASE_URL, connect_timeout=10)
     try:
         yield conn
         conn.commit()

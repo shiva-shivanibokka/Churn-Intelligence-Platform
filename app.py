@@ -1272,6 +1272,15 @@ def main():
         _db_url = os.getenv("DATABASE_URL", "")
     db.initialize(database_url=_db_url or None)
 
+    # Show DB status in sidebar so we can always see connection state
+    st.sidebar.markdown("---")
+    if db.is_available():
+        st.sidebar.success("DB connected", icon="🗄️")
+    elif _db_url:
+        st.sidebar.error("DB connection failed — check logs", icon="🗄️")
+    else:
+        st.sidebar.caption("🗄️ No DATABASE_URL set — audit trail disabled")
+
     # Generate a stable session ID for this browser session
     if "session_id" not in st.session_state:
         st.session_state["session_id"] = str(uuid.uuid4())
