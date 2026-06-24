@@ -20,19 +20,14 @@ export async function getCustomer(customerId: string): Promise<Customer | null> 
 }
 
 export async function getRetentionActions(limit = 200): Promise<RetentionAction[]> {
-  const { data, error } = await supabase
-    .from("retention_actions")
-    .select(`
-      *,
-      intervention_feedback(outcome)
-    `)
-    .order("generated_at", { ascending: false })
-    .limit(limit);
+  const [{ data: actions, error }, { data: feedback }] = await Promise.all([
+    supabase.from("retention_actions").select("*").order("generated_at", { ascending: false }).limit(limit),
+    supabase.from("intervention_feedback").select("retention_action_id, outcome"),
+  ]);
   if (error) throw error;
-  return (data ?? []).map((r: Record<string, unknown>) => ({
-    ...r,
-    outcome: (r.intervention_feedback as Array<{ outcome: string }>)?.[0]?.outcome ?? null,
-  })) as RetentionAction[];
+  const fbMap: Record<string, string> = {};
+  for (const f of feedback ?? []) fbMap[f.retention_action_id] = f.outcome;
+  return (actions ?? []).map((a) => ({ ...a, outcome: fbMap[a.id] ?? null })) as RetentionAction[];
 }
 
 export async function saveFeedback(

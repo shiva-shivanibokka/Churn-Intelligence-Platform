@@ -6,189 +6,221 @@ import { PageTitle, SectionHeading } from "@/components/ui/section-heading";
 import { MetricCard } from "@/components/ui/metric-card";
 import { ChartCard } from "@/components/ui/chart-card";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, Cell, AreaChart, Area,
+  BarChart, Bar, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
 
-const SEGMENT_COLORS: Record<string, string> = {
-  "Champions": "#4F46E5",
-  "Loyal Customers": "#7C3AED",
-  "At-Risk": "#EF4444",
-  "Hibernating": "#F59E0B",
-  "Lost Customers": "#6B7280",
-};
-const RISK_COLORS: Record<string, string> = {
-  "High Risk": "#EF4444",
-  "Medium Risk": "#F59E0B",
-  "Low Risk": "#10B981",
-};
+const SEGMENT_COLORS = ["#6366F1", "#A855F7", "#F43F5E", "#F59E0B", "#06B6D4"];
+const TIER_COLORS: Record<string, string> = { "High Risk": "#F43F5E", "Medium Risk": "#F59E0B", "Low Risk": "#10B981" };
 
 interface Props { customers: Customer[] }
 
 export function ChurnClient({ customers }: Props) {
-  const [selectedSegs, setSelectedSegs] = useState<string[]>([]);
+  const [segFilter, setSegFilter] = useState<string | null>(null);
 
-  const allSegments = useMemo(() => [...new Set(customers.map((c) => c.segment))], [customers]);
+  const segments = useMemo(() => [...new Set(customers.map((c) => c.segment))].sort(), [customers]);
 
   const filtered = useMemo(
-    () => selectedSegs.length ? customers.filter((c) => selectedSegs.includes(c.segment)) : customers,
-    [customers, selectedSegs]
+    () => (segFilter ? customers.filter((c) => c.segment === segFilter) : customers),
+    [customers, segFilter]
   );
 
   const kpis = useMemo(() => {
-    const total = filtered.length;
     const highRisk = filtered.filter((c) => c.risk_tier === "High Risk").length;
-    const avgProb = filtered.reduce((s, c) => s + c.churn_probability, 0) / total;
-    const actualChurn = filtered.filter((c) => c.churn === 1).length;
-    return { total, highRisk, avgProb, actualChurn };
+    const avgProb = filtered.reduce((s, c) => s + c.churn_probability, 0) / (filtered.length || 1);
+    const actualChurners = filtered.filter((c) => c.churn === 1).length;
+    return { highRisk, avgProb, actualChurners, total: filtered.length };
   }, [filtered]);
 
-  // Histogram bins
-  const histData = useMemo(() => {
-    const bins = Array.from({ length: 20 }, (_, i) => ({
-      range: `${(i * 5).toString().padStart(2, "0")}–${((i + 1) * 5).toString().padStart(2, "0")}%`,
+  // Probability histogram (buckets 0–10%, 10–20%, … 90–100%)
+  const probHist = useMemo(() => {
+    const buckets = Array.from({ length: 10 }, (_, i) => ({
+      range: `${i * 10}–${(i + 1) * 10}%`,
       count: 0,
     }));
     for (const c of filtered) {
-      const bin = Math.min(19, Math.floor(c.churn_probability * 20));
-      bins[bin].count++;
+      const idx = Math.min(Math.floor(c.churn_probability * 10), 9);
+      buckets[idx].count++;
     }
-    return bins;
+    return buckets;
   }, [filtered]);
 
-  // Risk tier by segment
-  const riskBySegData = useMemo(() => {
-    const segs = allSegments;
-    return segs.map((seg) => {
-      const rows = filtered.filter((c) => c.segment === seg);
+  // Risk tier grouped by segment
+  const tierBySeg = useMemo(() => {
+    const segs = segments;
+    return segs.map((seg, si) => {
+      const rows = customers.filter((c) => c.segment === seg);
       return {
         segment: seg,
-        "High Risk": rows.filter((c) => c.risk_tier === "High Risk").length,
+        "High Risk":   rows.filter((c) => c.risk_tier === "High Risk").length,
         "Medium Risk": rows.filter((c) => c.risk_tier === "Medium Risk").length,
-        "Low Risk": rows.filter((c) => c.risk_tier === "Low Risk").length,
+        "Low Risk":    rows.filter((c) => c.risk_tier === "Low Risk").length,
+        color: SEGMENT_COLORS[si % SEGMENT_COLORS.length],
       };
     });
-  }, [filtered, allSegments]);
+  }, [customers, segments]);
 
-  // SHAP top features (aggregate)
+  // SHAP bar — top features by avg |SHAP| for the filtered set
   const shapData = useMemo(() => {
-    const featureMap: Record<string, number[]> = {};
+    const totals: Record<string, { sum: number; count: number }> = {};
     for (const c of filtered) {
-      if (!c.top_shap_features) continue;
-      for (const [feat, val] of Object.entries(c.top_shap_features)) {
-        if (!featureMap[feat]) featureMap[feat] = [];
-        featureMap[feat].push(Math.abs(val));
+      const shap = (c.top_shap_features as Record<string, number>) ?? {};
+      for (const [feat, val] of Object.entries(shap)) {
+        if (!totals[feat]) totals[feat] = { sum: 0, count: 0 };
+        totals[feat].sum += Math.abs(val);
+        totals[feat].count++;
       }
     }
-    return Object.entries(featureMap)
-      .map(([feature, vals]) => ({
-        feature,
-        importance: vals.reduce((a, b) => a + b, 0) / vals.length,
-      }))
+    return Object.entries(totals)
+      .map(([feature, { sum, count }]) => ({ feature, importance: sum / count }))
       .sort((a, b) => b.importance - a.importance)
-      .slice(0, 12);
+      .slice(0, 8);
   }, [filtered]);
 
-  const toggleSeg = (seg: string) => {
-    setSelectedSegs((prev) =>
-      prev.includes(seg) ? prev.filter((s) => s !== seg) : [...prev, seg]
-    );
-  };
+  const histColors = probHist.map((_, i) => {
+    if (i >= 7) return "#F43F5E";
+    if (i >= 4) return "#F59E0B";
+    return "#10B981";
+  });
 
   return (
     <div>
       <PageTitle>Churn Risk Dashboard</PageTitle>
 
-      {/* KPI row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <MetricCard label="Total Customers" value={kpis.total.toLocaleString()} accentColor="#4F46E5" />
-        <MetricCard label="High Risk" value={kpis.highRisk.toLocaleString()} delta={`${((kpis.highRisk / kpis.total) * 100).toFixed(1)}% of total`} accentColor="#EF4444" />
-        <MetricCard label="Avg Churn Prob" value={`${(kpis.avgProb * 100).toFixed(1)}%`} accentColor="#F59E0B" />
-        <MetricCard label="Actual Churned" value={kpis.actualChurn.toLocaleString()} delta={`${((kpis.actualChurn / kpis.total) * 100).toFixed(1)}% rate`} accentColor="#7C3AED" />
+      <div className="bg-[#FFF1F2] border-l-4 border-[#F43F5E] rounded-r-xl px-4 py-3 mb-6 text-[14px] text-[#7F1D1D]">
+        <strong>What this page shows:</strong> The XGBoost churn model scored every customer with a probability of churning (0–100%). This page breaks that down by segment, risk tier, and the specific features (SHAP values) driving each score. Use the <strong>segment filter below</strong> to zoom into one group — all four charts update together to reflect only those customers.
       </div>
 
-      {/* Segment filter */}
-      <div className="flex flex-wrap gap-2 mb-6">
-        <span className="text-[13px] font-semibold text-[#4F46E5] self-center">Filter:</span>
-        {allSegments.map((seg) => (
+      {/* Segment filter chips */}
+      <div className="flex flex-wrap items-center gap-2 mb-6">
+        <span className="text-[13px] font-semibold text-[#6B7280] mr-1">Filter by segment:</span>
+        <button
+          onClick={() => setSegFilter(null)}
+          className="px-3 py-1.5 rounded-full text-[13px] font-semibold border-2 transition-all"
+          style={!segFilter
+            ? { background: "#6366F1", borderColor: "#6366F1", color: "white" }
+            : { background: "white", borderColor: "#DDD6FE", color: "#6366F1" }}
+        >
+          All Segments
+        </button>
+        {segments.map((s, i) => (
           <button
-            key={seg}
-            onClick={() => toggleSeg(seg)}
-            className={`px-3 py-1 rounded-full text-[13px] font-semibold border-2 transition-all ${
-              selectedSegs.includes(seg)
-                ? "text-white border-transparent"
-                : "bg-white text-[#6B7280] border-[#DDD6FE] hover:border-[#818CF8]"
-            }`}
-            style={selectedSegs.includes(seg) ? { background: SEGMENT_COLORS[seg] ?? "#4F46E5" } : {}}
+            key={s}
+            onClick={() => setSegFilter(segFilter === s ? null : s)}
+            className="px-3 py-1.5 rounded-full text-[13px] font-semibold border-2 transition-all"
+            style={segFilter === s
+              ? { background: SEGMENT_COLORS[i % SEGMENT_COLORS.length], borderColor: SEGMENT_COLORS[i % SEGMENT_COLORS.length], color: "white" }
+              : { background: "white", borderColor: "#DDD6FE", color: SEGMENT_COLORS[i % SEGMENT_COLORS.length] }}
           >
-            {seg}
+            {s}
           </button>
         ))}
-        {selectedSegs.length > 0 && (
-          <button onClick={() => setSelectedSegs([])} className="px-3 py-1 text-[13px] text-[#EF4444] font-semibold">
-            Clear
-          </button>
+        {segFilter && (
+          <span className="text-[12px] text-[#6B7280] ml-2 italic">
+            Showing {kpis.total.toLocaleString()} customers in <strong>{segFilter}</strong> — all charts reflect this filter.
+          </span>
         )}
       </div>
 
-      {/* Probability histogram */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <MetricCard label="Total Customers" value={kpis.total.toLocaleString()} accentColor="#6366F1" />
+        <MetricCard label="High Risk" value={kpis.highRisk.toLocaleString()} delta={`${((kpis.highRisk / kpis.total) * 100).toFixed(1)}% of group`} accentColor="#F43F5E" />
+        <MetricCard label="Avg Churn Prob" value={`${(kpis.avgProb * 100).toFixed(1)}%`} accentColor="#F59E0B" />
+        <MetricCard label="Actual Churners" value={kpis.actualChurners.toLocaleString()} delta={`${((kpis.actualChurners / kpis.total) * 100).toFixed(1)}% observed`} accentColor="#A855F7" />
+      </div>
+
+      {/* Probability distribution */}
       <SectionHeading>Churn Probability Distribution</SectionHeading>
-      <ChartCard caption="Each bar shows how many customers fall in that probability range. A spike near 100% = high-confidence churn predictions.">
-        <ResponsiveContainer width="100%" height={440}>
-          <AreaChart data={histData} margin={{ top: 10, right: 20, left: 0, bottom: 60 }}>
-            <defs>
-              <linearGradient id="cg1" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#4F46E5" stopOpacity={0.85} />
-                <stop offset="100%" stopColor="#7C3AED" stopOpacity={0.15} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#E0E7FF" />
-            <XAxis dataKey="range" tick={{ fontSize: 11, fill: "#6B7280" }} angle={-45} textAnchor="end" />
+      <div className="bg-[#FFF1F2] border border-[#FECDD3] rounded-xl px-4 py-2.5 mb-3 text-[13px] text-[#9F1239]">
+        How many customers fall into each risk bucket. <span className="font-semibold text-[#10B981]">Green bars (0–30%)</span> = safe, light-touch nurture. <span className="font-semibold text-[#F59E0B]">Amber (40–60%)</span> = watch list, monitor next 30 days. <span className="font-semibold text-[#F43F5E]">Red (70–100%)</span> = immediate intervention — these customers will cancel without action.
+      </div>
+      <ChartCard>
+        <ResponsiveContainer width="100%" height={420}>
+          <BarChart data={probHist} margin={{ top: 10, right: 20, left: 0, bottom: 30 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#FFE4E6" />
+            <XAxis dataKey="range" tick={{ fontSize: 12, fill: "#6B7280" }} label={{ value: "Churn Probability Bucket", position: "insideBottom", offset: -15, fontSize: 13, fill: "#9CA3AF" }} />
             <YAxis tick={{ fontSize: 12, fill: "#6B7280" }} />
-            <Tooltip contentStyle={{ borderRadius: "10px", border: "2px solid #DDD6FE", fontSize: 13 }} />
-            <Area type="monotone" dataKey="count" fill="url(#cg1)" stroke="#4F46E5" strokeWidth={2} name="Customers" />
-          </AreaChart>
-        </ResponsiveContainer>
-      </ChartCard>
-
-      <div className="h-8" />
-
-      {/* Risk Tier by Segment */}
-      <SectionHeading>Risk Tier by Segment</SectionHeading>
-      <ChartCard caption="High Risk = churn probability above 60%. Use this to size retention budget by segment.">
-        <ResponsiveContainer width="100%" height={440}>
-          <BarChart data={riskBySegData} margin={{ top: 10, right: 20, left: 0, bottom: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#E0E7FF" />
-            <XAxis dataKey="segment" tick={{ fontSize: 13, fill: "#6B7280" }} />
-            <YAxis tick={{ fontSize: 12, fill: "#6B7280" }} />
-            <Tooltip contentStyle={{ borderRadius: "10px", border: "2px solid #DDD6FE", fontSize: 13 }} />
-            <Legend wrapperStyle={{ fontSize: 13, paddingTop: 12 }} />
-            <Bar dataKey="High Risk" fill="#EF4444" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="Medium Risk" fill="#F59E0B" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="Low Risk" fill="#10B981" radius={[4, 4, 0, 0]} />
+            <Tooltip contentStyle={{ borderRadius: "10px", border: "2px solid #FECDD3", fontSize: 13 }} formatter={(v) => [v, "Customers"]} />
+            <Bar dataKey="count" name="Customers" radius={[5, 5, 0, 0]}>
+              {probHist.map((_, i) => <Cell key={i} fill={histColors[i]} />)}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
 
       <div className="h-8" />
 
-      {/* SHAP Feature Importance */}
-      <SectionHeading>Top Churn Drivers (SHAP)</SectionHeading>
-      <ChartCard caption="Mean absolute SHAP value across filtered customers — higher = stronger influence on churn prediction.">
-        <ResponsiveContainer width="100%" height={440}>
+      {/* Risk tier by segment */}
+      <SectionHeading>Risk Tier Breakdown by Segment</SectionHeading>
+      <div className="bg-[#FFF1F2] border border-[#FECDD3] rounded-xl px-4 py-2.5 mb-3 text-[13px] text-[#9F1239]">
+        Stacked bars show the absolute number of High / Medium / Low risk customers in each segment. A segment dominated by <span className="font-semibold text-[#F43F5E]">red</span> needs an urgent campaign; mostly <span className="font-semibold text-[#10B981]">green</span> only needs light-touch nurture. This always shows all segments regardless of the segment filter above, so you can compare them side by side.
+      </div>
+      <ChartCard>
+        <ResponsiveContainer width="100%" height={400}>
+          <BarChart data={tierBySeg} margin={{ top: 10, right: 20, left: 0, bottom: 30 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#FFE4E6" />
+            <XAxis dataKey="segment" tick={{ fontSize: 12, fill: "#1E1B4B" }} />
+            <YAxis tick={{ fontSize: 12, fill: "#6B7280" }} />
+            <Tooltip contentStyle={{ borderRadius: "10px", border: "2px solid #FECDD3", fontSize: 13 }} />
+            <Legend wrapperStyle={{ fontSize: 13, paddingTop: 12 }} />
+            <Bar dataKey="High Risk"   stackId="a" fill={TIER_COLORS["High Risk"]} />
+            <Bar dataKey="Medium Risk" stackId="a" fill={TIER_COLORS["Medium Risk"]} />
+            <Bar dataKey="Low Risk"    stackId="a" fill={TIER_COLORS["Low Risk"]} radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+      <div className="h-8" />
+
+      {/* SHAP feature importance */}
+      <SectionHeading>Top Churn Drivers — SHAP Feature Importance</SectionHeading>
+      <div className="bg-[#EEF2FF] border border-[#DDD6FE] rounded-xl px-4 py-2.5 mb-3 text-[13px] text-[#4338CA]">
+        SHAP (SHapley Additive exPlanations) measures exactly how much each feature pushes the churn probability up or down for each customer. This shows the average importance across {segFilter ? `the ${segFilter} segment` : "all customers"}. <strong>Longer bar = bigger influence on whether someone churns.</strong> These are the levers your retention campaigns should pull first — target the top driver with your most impactful offer.
+      </div>
+      <ChartCard>
+        <ResponsiveContainer width="100%" height={400}>
+          <BarChart data={shapData} layout="vertical" margin={{ top: 10, right: 30, left: 130, bottom: 10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#E0E7FF" />
+            <XAxis type="number" tick={{ fontSize: 11, fill: "#6B7280" }} tickFormatter={(v) => v.toFixed(3)} />
+            <YAxis type="category" dataKey="feature" tick={{ fontSize: 12, fill: "#1E1B4B" }} width={125} />
+            <Tooltip contentStyle={{ borderRadius: "10px", border: "2px solid #DDD6FE", fontSize: 13 }} formatter={(v) => [Number(v).toFixed(4), "Avg |SHAP|"]} />
+            <Bar dataKey="importance" name="Importance" radius={[0, 5, 5, 0]}>
+              {shapData.map((_, i) => (
+                <Cell key={i} fill={
+                  i === 0 ? "#F43F5E" : i === 1 ? "#F97316" : i === 2 ? "#F59E0B" :
+                  i === 3 ? "#6366F1" : i === 4 ? "#A855F7" : "#06B6D4"
+                } />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+      <div className="h-8" />
+
+      {/* Avg churn prob by segment */}
+      <SectionHeading>Average Churn Probability by Segment</SectionHeading>
+      <div className="bg-[#EEF2FF] border border-[#DDD6FE] rounded-xl px-4 py-2.5 mb-3 text-[13px] text-[#4338CA]">
+        Compares the mean predicted churn probability across all 5 segments. Higher bar = higher urgency for that group. Use this to prioritise which segment to run your next retention campaign against.
+      </div>
+      <ChartCard>
+        <ResponsiveContainer width="100%" height={340}>
           <BarChart
-            data={shapData}
+            data={segments.map((seg, i) => ({
+              segment: seg,
+              avgProb: customers.filter((c) => c.segment === seg).reduce((s, c) => s + c.churn_probability, 0) /
+                (customers.filter((c) => c.segment === seg).length || 1),
+              color: SEGMENT_COLORS[i % SEGMENT_COLORS.length],
+            }))}
             layout="vertical"
-            margin={{ top: 10, right: 30, left: 140, bottom: 10 }}
+            margin={{ top: 10, right: 40, left: 130, bottom: 10 }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#E0E7FF" />
-            <XAxis type="number" tick={{ fontSize: 12, fill: "#6B7280" }} />
-            <YAxis type="category" dataKey="feature" tick={{ fontSize: 12, fill: "#1E1B4B" }} width={130} />
-            <Tooltip contentStyle={{ borderRadius: "10px", border: "2px solid #DDD6FE", fontSize: 13 }} />
-            <Bar dataKey="importance" name="Mean |SHAP|" radius={[0, 4, 4, 0]}>
-              {shapData.map((_, i) => (
-                <Cell key={i} fill={i === 0 ? "#4F46E5" : i === 1 ? "#6366F1" : "#818CF8"} />
-              ))}
+            <XAxis type="number" tickFormatter={(v) => `${(v * 100).toFixed(0)}%`} tick={{ fontSize: 11, fill: "#6B7280" }} />
+            <YAxis type="category" dataKey="segment" tick={{ fontSize: 12, fill: "#1E1B4B" }} width={125} />
+            <Tooltip contentStyle={{ borderRadius: "10px", border: "2px solid #DDD6FE", fontSize: 13 }} formatter={(v) => [`${(Number(v) * 100).toFixed(1)}%`, "Avg Churn Prob"]} />
+            <Bar dataKey="avgProb" name="Avg Churn Prob" radius={[0, 5, 5, 0]}>
+              {segments.map((_, i) => <Cell key={i} fill={SEGMENT_COLORS[i % SEGMENT_COLORS.length]} />)}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
