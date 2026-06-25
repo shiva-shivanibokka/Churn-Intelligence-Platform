@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { Customer } from "@/lib/supabase";
 import { SegmentSummaryRow, UmapPoint } from "@/lib/data";
 import { PageTitle, SectionHeading } from "@/components/ui/section-heading";
 import { MetricCard } from "@/components/ui/metric-card";
@@ -53,7 +52,7 @@ const COLORSCALE_HIGH_GOOD: Plotly.ColorScale = [[0, "#EF4444"], [0.5, "#FCD34D"
 const UMAP_CAPTIONS: Record<string, { label: string; caption: string }> = {
   Segment: {
     label: "Coloured by Segment",
-    caption: "Each dot is one customer (all ~1,500 are plotted). Well-separated colour blobs confirm the 5 segments are behaviourally distinct. Customers within a blob behave similarly; customers in different blobs behave differently. This is what makes targeted retention possible.",
+    caption: "Each dot is one customer (up to 10,000 plotted). Well-separated colour blobs confirm the 5 segments are behaviourally distinct. Customers within a blob behave similarly; customers in different blobs behave differently. This is what makes targeted retention possible.",
   },
   Churn: {
     label: "Coloured by Actual Churn (0 = stayed, 1 = churned)",
@@ -73,28 +72,19 @@ const UMAP_CAPTIONS: Record<string, { label: string; caption: string }> = {
   },
 };
 
-interface Props { summary: SegmentSummaryRow[]; umap: UmapPoint[]; customers: Customer[] }
+interface Props { summary: SegmentSummaryRow[]; umap: UmapPoint[] }
 
-export function SegmentationClient({ summary, umap, customers }: Props) {
+export function SegmentationClient({ summary, umap }: Props) {
   const [colorBy, setColorBy] = useState("Segment");
   const [showDefs, setShowDefs] = useState(false);
 
-  const segments = useMemo(() => {
-    const map: Record<string, Customer[]> = {};
-    for (const c of customers) {
-      if (!map[c.segment]) map[c.segment] = [];
-      map[c.segment].push(c);
-    }
-    return map;
-  }, [customers]);
-
   const kpiData = useMemo(() =>
-    Object.entries(segments).map(([seg, rows]) => ({
-      segment: seg,
-      count: rows.length,
-      churnRate: rows.filter((r) => r.churn === 1).length / rows.length,
-      color: SEGMENT_COLORS[seg] ?? "#6B7280",
-    })), [segments]);
+    summary.map((s) => ({
+      segment: s.segment,
+      count: s.customer_count,
+      churnRate: s.churn_rate,
+      color: SEGMENT_COLORS[s.segment] ?? "#6B7280",
+    })), [summary]);
 
   const umapTraces = useMemo(() => {
     if (colorBy === "Segment") {
@@ -110,7 +100,7 @@ export function SegmentationClient({ summary, umap, customers }: Props) {
         x: rows.map((r) => r.umap_1),
         y: rows.map((r) => r.umap_2),
         text: rows.map((r) => `Customer ${r.customer_id}<br>Seg: ${r.segment}<br>Churn Prob: ${(r.churn_probability * 100).toFixed(1)}%`),
-        marker: { size: 5, color: SEGMENT_COLORS[seg] ?? "#6B7280", opacity: 0.75, line: { width: 0.5, color: "white" } },
+        marker: { size: 7, color: SEGMENT_COLORS[seg] ?? "#6B7280", opacity: 0.82, line: { width: 0.6, color: "white" } },
         hovertemplate: "%{text}<extra>%{fullData.name}</extra>",
       }));
     }
@@ -135,40 +125,32 @@ export function SegmentationClient({ summary, umap, customers }: Props) {
       name: colorBy,
       x: umap.map((c) => c.umap_1),
       y: umap.map((c) => c.umap_2),
-      marker: { size: 5, color: colorValues, colorscale, cmin, cmax, showscale: true, opacity: 0.75, line: { width: 0.5, color: "white" }, colorbar: { thickness: 14, len: 0.8, tickfont: { size: 11 } } },
+      marker: { size: 7, color: colorValues, colorscale, cmin, cmax, showscale: true, opacity: 0.82, line: { width: 0.6, color: "white" }, colorbar: { thickness: 14, len: 0.8, tickfont: { size: 11 } } },
       text: umap.map((c) => `Customer ${c.customer_id}<br>Seg: ${c.segment}<br>Prob: ${(c.churn_probability * 100).toFixed(1)}%`),
       hovertemplate: "%{text}<extra></extra>",
     }];
   }, [colorBy, umap]);
 
-  const gmmData = useMemo(() => {
-    return Object.keys(segments).map((seg) => {
-      const rows = segments[seg];
-      const confs = rows.map((r) => {
-        const probs = [r.gmm_prob_seg0, r.gmm_prob_seg1, r.gmm_prob_seg2, r.gmm_prob_seg3, r.gmm_prob_seg4]
-          .filter((v): v is number => v !== null);
-        return probs.length ? Math.max(...probs) : 1;
-      });
-      return {
-        segment: seg,
-        "High ≥90%":     confs.filter((v) => v >= 0.9).length,
-        "Medium 80–90%": confs.filter((v) => v >= 0.8 && v < 0.9).length,
-        "Boundary <80%": confs.filter((v) => v < 0.8).length,
-      };
-    });
-  }, [segments]);
+  const gmmData = useMemo(() =>
+    summary.map((s) => ({
+      segment: s.segment,
+      "High ≥90%":     s.gmm_high,
+      "Medium 80–90%": s.gmm_medium,
+      "Boundary <80%": s.gmm_boundary,
+    })), [summary]);
 
   const heatmapData = useMemo(() => {
-    const features = ["tenure", "satisfaction_score", "days_since_last_order", "hour_spend_on_app", "cashback_amount"];
     const labels = ["Tenure", "Satisfaction", "Days Since Order", "App Hours", "Cashback"];
-    const segs = Object.keys(segments);
-    return { labels, segs, values: features.map((f) =>
-      segs.map((s) => {
-        const vals = segments[s].map((r) => (r as Record<string, unknown>)[f] as number).filter((v) => v != null);
-        return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
-      })
-    )};
-  }, [segments]);
+    const segs = summary.map((s) => s.segment);
+    const values = [
+      summary.map((s) => s.avg_tenure),
+      summary.map((s) => s.avg_satisfaction),
+      summary.map((s) => s.avg_days_since_order),
+      summary.map((s) => s.avg_hour_spend),
+      summary.map((s) => s.avg_cashback),
+    ];
+    return { labels, segs, values };
+  }, [summary]);
 
   const currentCaption = UMAP_CAPTIONS[colorBy] ?? UMAP_CAPTIONS.Segment;
 
@@ -177,7 +159,7 @@ export function SegmentationClient({ summary, umap, customers }: Props) {
       <PageTitle>Customer Segmentation</PageTitle>
 
       <div className="bg-[#EEF2FF] border-l-4 border-[#6366F1] rounded-r-xl px-4 py-3 mb-4 text-[14px] text-[#1E1B4B]">
-        <strong>What this page shows:</strong> ~{customers.length.toLocaleString()} customers grouped into 5 behavioural segments using K-Means clustering on purchase, engagement, and satisfaction patterns. Each segment has a different churn profile and needs a different retention strategy.
+        <strong>What this page shows:</strong> ~{summary.reduce((s, r) => s + r.customer_count, 0).toLocaleString()} customers grouped into 5 behavioural segments using K-Means clustering on purchase, engagement, and satisfaction patterns. Each segment has a different churn profile and needs a different retention strategy.
       </div>
 
       {/* Segment definitions */}

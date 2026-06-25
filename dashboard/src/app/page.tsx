@@ -1,13 +1,12 @@
-import { getSegmentSummary, getUmapData, getCustomers } from "@/lib/data";
+import { getSegmentSummary, getUmapData } from "@/lib/data";
 import { SegmentationClient } from "@/components/pages/segmentation-client";
 
 export const dynamic = "force-dynamic";
 
 export default async function SegmentationPage() {
-  const [summary, umap, customers] = await Promise.all([
+  const [summary, umap] = await Promise.all([
     getSegmentSummary().catch(() => []),
     getUmapData().catch(() => []),
-    getCustomers().catch(() => []),
   ]);
-  return <SegmentationClient summary={summary} umap={umap} customers={customers} />;
+  return <SegmentationClient summary={summary} umap={umap} />;
 }
