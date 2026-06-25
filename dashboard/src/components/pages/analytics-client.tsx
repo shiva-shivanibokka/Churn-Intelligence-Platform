@@ -1,28 +1,50 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { RetentionAction } from "@/lib/supabase";
 import { saveFeedback } from "@/lib/data";
 import { PageTitle, SectionHeading } from "@/components/ui/section-heading";
 import { MetricCard } from "@/components/ui/metric-card";
 
-interface Summary {
-  total: number;
-  retained: number;
-  churned: number;
-  pending: number;
-  byType: { type: string; total: number; retained: number; withFeedback: number; rate: number | null }[];
-  bySeg: { segment: string; total: number; retained: number; withFeedback: number; rate: number | null }[];
-}
-
 interface Props {
   actions: RetentionAction[];
-  summary: Summary;
 }
 
-export function AnalyticsClient({ actions: initialActions, summary }: Props) {
+function computeSummary(actions: RetentionAction[]) {
+  const retained = actions.filter((a) => a.outcome === "retained").length;
+  const churned  = actions.filter((a) => a.outcome === "churned").length;
+  const total    = actions.length;
+
+  const byTypeMap: Record<string, { total: number; retained: number; withFeedback: number }> = {};
+  const bySegMap:  Record<string, { total: number; retained: number; withFeedback: number }> = {};
+
+  for (const a of actions) {
+    const t = a.intervention_type ?? "Unknown";
+    const s = a.segment ?? "Unknown";
+    if (!byTypeMap[t]) byTypeMap[t] = { total: 0, retained: 0, withFeedback: 0 };
+    if (!bySegMap[s])  bySegMap[s]  = { total: 0, retained: 0, withFeedback: 0 };
+    byTypeMap[t].total++;
+    bySegMap[s].total++;
+    if (a.outcome) {
+      byTypeMap[t].withFeedback++;
+      bySegMap[s].withFeedback++;
+      if (a.outcome === "retained") { byTypeMap[t].retained++; bySegMap[s].retained++; }
+    }
+  }
+
+  return {
+    total, retained, churned,
+    pending: total - retained - churned,
+    byType: Object.entries(byTypeMap).map(([type, v]) => ({ type, ...v, rate: v.withFeedback ? Math.round((v.retained / v.withFeedback) * 100) : null })),
+    bySeg:  Object.entries(bySegMap).map(([segment, v]) => ({ segment, ...v, rate: v.withFeedback ? Math.round((v.retained / v.withFeedback) * 100) : null })),
+  };
+}
+
+export function AnalyticsClient({ actions: initialActions }: Props) {
   const [actions, setActions] = useState(initialActions);
   const [saving, setSaving] = useState<string | null>(null);
+
+  const summary = useMemo(() => computeSummary(actions), [actions]);
 
   const updateOutcome = useCallback(async (action: RetentionAction, outcome: string) => {
     if (saving) return;

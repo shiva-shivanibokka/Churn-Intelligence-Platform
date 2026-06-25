@@ -23,14 +23,148 @@ type Action = {
   confidence?: string;
   do_not_intervene_reason?: string;
   error?: string;
-  trace?: unknown[];
+  trace?: TraceStep[];
 };
+
+type TraceStep = {
+  round: number;
+  tool: string;
+  args: Record<string, unknown>;
+  result: Record<string, unknown>;
+};
+
+type ChatMessage = { role: string; content: string; trace?: TraceStep[] };
+
+const TOOL_META: Record<string, { label: string; color: string }> = {
+  get_top_churn_drivers:    { label: "Top Churn Drivers",    color: "#F43F5E" },
+  lookup_customer_details:  { label: "Customer Details",     color: "#6366F1" },
+  get_segment_benchmark:    { label: "Segment Benchmark",    color: "#A855F7" },
+  search_retention_playbook:{ label: "Retention Playbook",   color: "#F59E0B" },
+  calculate_intervention_roi:{ label: "ROI Calculation",     color: "#10B981" },
+};
+
+function renderToolResult(tool: string, result: Record<string, unknown>) {
+  if (tool === "get_top_churn_drivers") {
+    const factors = result.top_risk_factors as { feature: string; shap_value: number; effect: string; magnitude: string }[] ?? [];
+    return (
+      <div className="space-y-1.5">
+        <p className="text-[11px] font-bold text-[#6B7280] uppercase tracking-wide mb-2">
+          Primary driver: <span className="text-[#1E1B4B] normal-case font-semibold">{String(result.primary_driver ?? "—")}</span>
+        </p>
+        {factors.map((f) => (
+          <div key={f.feature} className="flex items-center gap-2">
+            <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${f.effect.includes("increases") ? "bg-[#FEE2E2] text-[#991B1B]" : "bg-[#D1FAE5] text-[#065F46]"}`}>
+              {f.effect.includes("increases") ? "▲" : "▼"}
+            </span>
+            <span className="text-[12px] font-semibold text-[#1E1B4B] w-52 shrink-0">{f.feature}</span>
+            <span className="text-[11px] text-[#6B7280]">SHAP {f.shap_value.toFixed(4)} · {f.magnitude}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (tool === "lookup_customer_details") {
+    const fields: [string, string][] = [
+      ["Segment", String(result.segment ?? "—")],
+      ["Churn Prob", result.churn_probability !== undefined ? `${(Number(result.churn_probability) * 100).toFixed(1)}%` : "—"],
+      ["Risk Tier", String(result.risk_tier ?? "—")],
+      ["Customer Type", String(result.customer_type ?? "—")],
+      ["Uplift Score", result.uplift_score !== undefined ? `${(Number(result.uplift_score) * 100).toFixed(2)}%` : "—"],
+      ["Net ROI", result.net_roi !== undefined ? `$${Number(result.net_roi).toFixed(2)}` : "—"],
+      ["Tenure", result.tenure !== undefined ? `${result.tenure} months` : "—"],
+      ["Satisfaction", String(result.satisfaction_score ?? "—")],
+    ];
+    return (
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+        {fields.map(([k, v]) => (
+          <div key={k} className="flex gap-1 text-[12px]">
+            <span className="text-[#7C3AED] font-semibold shrink-0">{k}:</span>
+            <span className="text-[#1E1B4B]">{v}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (tool === "get_segment_benchmark") {
+    return (
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-[12px]">
+        {[
+          ["Segment", String(result.segment ?? "—")],
+          ["Customers", String(result.customer_count ?? "—")],
+          ["Avg Churn Prob", result.avg_churn_probability !== undefined ? `${(Number(result.avg_churn_probability) * 100).toFixed(1)}%` : "—"],
+          ["Avg Uplift", result.avg_uplift_score !== undefined ? `${(Number(result.avg_uplift_score) * 100).toFixed(2)}%` : "—"],
+          ["% High Risk", result.pct_high_risk !== undefined ? `${(Number(result.pct_high_risk) * 100).toFixed(1)}%` : "—"],
+          ["% Persuadable", result.pct_persuadable !== undefined ? `${(Number(result.pct_persuadable) * 100).toFixed(1)}%` : "—"],
+        ].map(([k, v]) => (
+          <div key={k} className="flex gap-1">
+            <span className="text-[#7C3AED] font-semibold shrink-0">{k}:</span>
+            <span className="text-[#1E1B4B]">{v}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (tool === "search_retention_playbook") {
+    return (
+      <div className="space-y-1 text-[12px]">
+        <div className="flex gap-1"><span className="text-[#7C3AED] font-semibold">Recommended:</span><span className="text-[#1E1B4B] font-semibold">{String(result.intervention ?? "—")}</span></div>
+        <div className="flex gap-1"><span className="text-[#7C3AED] font-semibold">Cost:</span><span className="text-[#1E1B4B]">{String(result.cost ?? "—")}</span></div>
+        <p className="text-[#1E1B4B] italic mt-1">"{String(result.message ?? "")}"</p>
+      </div>
+    );
+  }
+  if (tool === "calculate_intervention_roi") {
+    const net = Number(result.net_roi ?? 0);
+    return (
+      <div className="space-y-1 text-[12px]">
+        <div className="flex gap-4">
+          <div><span className="text-[#7C3AED] font-semibold">Expected Value: </span><span className="font-bold">${Number(result.expected_value ?? 0).toFixed(2)}</span></div>
+          <div><span className="text-[#7C3AED] font-semibold">Net ROI: </span><span className={`font-bold ${net >= 0 ? "text-[#10B981]" : "text-[#EF4444]"}`}>${net.toFixed(2)}</span></div>
+          <div><span className="text-[#7C3AED] font-semibold">ROI %: </span><span className="font-bold">{Number(result.roi_pct ?? 0).toFixed(0)}%</span></div>
+        </div>
+        <p className={`font-semibold text-[12px] ${net >= 0 ? "text-[#10B981]" : "text-[#EF4444]"}`}>{String(result.recommendation ?? "")}</p>
+      </div>
+    );
+  }
+  return <pre className="text-[11px] text-[#6B7280] whitespace-pre-wrap">{JSON.stringify(result, null, 2)}</pre>;
+}
+
+function AgentTrace({ trace }: { trace: TraceStep[] }) {
+  if (!trace || trace.length === 0) return null;
+  return (
+    <div className="mt-4 border-t border-[#EDE9FE] pt-4">
+      <p className="text-[11px] font-bold uppercase tracking-wide text-[#7C3AED] mb-3">
+        Agent Reasoning — {trace.length} tool call{trace.length !== 1 ? "s" : ""}
+      </p>
+      <div className="relative pl-6">
+        <div className="absolute left-2.5 top-0 bottom-0 w-px bg-[#DDD6FE]" />
+        {trace.map((step, si) => {
+          const meta = TOOL_META[step.tool] ?? { label: step.tool, color: "#6B7280" };
+          return (
+            <div key={si} className="relative mb-4">
+              <span
+                className="absolute -left-6 top-0 w-5 h-5 rounded-full text-white text-[9px] font-bold flex items-center justify-center shrink-0"
+                style={{ background: meta.color }}
+              >
+                {step.round}
+              </span>
+              <div className="bg-white border border-[#EDE9FE] rounded-xl px-4 py-3 shadow-sm">
+                <p className="text-[12px] font-bold mb-2" style={{ color: meta.color }}>{meta.label}</p>
+                {renderToolResult(step.tool, step.result)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export function RetentionClient({ persuadables }: Props) {
   const [selectedId, setSelectedId] = useState("");
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<Action | null>(null);
-  const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [tab, setTab] = useState<"batch" | "chat">("batch");
@@ -57,7 +191,7 @@ export function RetentionClient({ persuadables }: Props) {
 
   async function sendChat() {
     if (!chatInput.trim()) return;
-    const userMsg = { role: "user", content: chatInput };
+    const userMsg: ChatMessage = { role: "user", content: chatInput };
     const history = [...chatMessages, userMsg];
     setChatMessages(history);
     setChatInput("");
@@ -66,10 +200,15 @@ export function RetentionClient({ persuadables }: Props) {
       const res = await fetch("/api/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "chat", message: chatInput, history: chatMessages }),
+        body: JSON.stringify({ mode: "chat", message: chatInput, history: chatMessages.map(({ role, content }) => ({ role, content })) }),
       });
       const data = await res.json();
-      setChatMessages([...history, { role: "assistant", content: data.response ?? data.error ?? "No response." }]);
+      const aiMsg: ChatMessage = {
+        role: "assistant",
+        content: data.response ?? data.error ?? "No response.",
+        trace: data.trace?.length ? data.trace : undefined,
+      };
+      setChatMessages([...history, aiMsg]);
     } catch (e) {
       setChatMessages([...history, { role: "assistant", content: `Error: ${e}` }]);
     }
@@ -176,25 +315,7 @@ export function RetentionClient({ persuadables }: Props) {
                   </div>
                 </div>
                 {action.trace && (action.trace as unknown[]).length > 0 && (
-                  <div className="mt-3">
-                    <p className="text-[12px] font-bold uppercase tracking-wide text-[#7C3AED] mb-2">
-                      Agent Reasoning — {(action.trace as unknown[]).length} tool calls
-                    </p>
-                    <div className="space-y-2">
-                      {(action.trace as { round: number; tool: string; args: Record<string, unknown>; result: unknown }[]).map((step, si) => (
-                        <div key={si} className="bg-[#F5F3FF] border border-[#DDD6FE] rounded-xl px-4 py-3">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="w-5 h-5 rounded-full bg-[#6366F1] text-white text-[10px] font-bold flex items-center justify-center shrink-0">{step.round}</span>
-                            <span className="text-[13px] font-semibold text-[#4338CA]">{step.tool}</span>
-                          </div>
-                          <p className="text-[11px] text-[#6B7280] mb-1">Args: {JSON.stringify(step.args)}</p>
-                          <p className="text-[11px] text-[#1E1B4B] bg-white rounded-lg px-2 py-1 border border-[#E0E7FF] overflow-x-auto whitespace-pre-wrap">
-                            {typeof step.result === "string" ? step.result : JSON.stringify(step.result, null, 1)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  <AgentTrace trace={action.trace as TraceStep[]} />
                 )}
               </div>
             </div>
@@ -242,6 +363,7 @@ export function RetentionClient({ persuadables }: Props) {
                   {m.role === "user" ? "You" : "AI Assistant"}
                 </p>
                 <p className="text-[#1E1B4B] whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                {m.role === "assistant" && m.trace && <AgentTrace trace={m.trace} />}
               </div>
             ))}
             {chatLoading && (
