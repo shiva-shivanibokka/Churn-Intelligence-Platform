@@ -53,16 +53,16 @@ Raw behavioral data (3 supported datasets)
 flowchart TD
     subgraph pipeline["Python ML Pipeline"]
         A[Raw Data] --> B[Feature Engineering]
-        B --> C[Segmentation\nK-Means++ · GMM · PaCMAP]
-        C --> D[Churn Prediction\nPer-segment CatBoost]
-        D --> E[Uplift Modeling\nT-Learner · S-Learner]
+        B --> C["Segmentation<br/>K-Means++ · GMM · PaCMAP"]
+        C --> D["Churn Prediction<br/>Per-segment CatBoost"]
+        D --> E["Uplift Modeling<br/>T-Learner · S-Learner"]
     end
 
     subgraph api["FastAPI Serving"]
-        F[/health\n/readiness\n/score]
+        F["/health · /readiness · /score"]
     end
 
-    E -->|enriched customers table| G[(Supabase\nPostgreSQL\n5 tables · 10 RPCs)]
+    E -->|enriched customers table| G[("Supabase PostgreSQL<br/>5 tables · 10 RPCs")]
     E --> F
 
     subgraph dashboard["Next.js 16 Dashboard"]
@@ -76,12 +76,12 @@ flowchart TD
     G --> dashboard
 
     subgraph agent["ReAct AI Agent"]
-        M[llama-3.3-70b-versatile\n12 tools · max 5 rounds]
+        M["llama-3.3-70b-versatile<br/>12 tools · max 5 rounds"]
     end
 
     K --> agent
     agent -->|saves retention_actions| G
-    L -->|reads retention_actions\nintervention_feedback| G
+    L -->|reads retention_actions + feedback| G
 ```
 
 **Why it's shaped this way:**
