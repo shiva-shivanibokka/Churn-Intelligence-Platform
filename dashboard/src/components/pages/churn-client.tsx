@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Customer } from "@/lib/supabase";
+import { useState } from "react";
+import {
+  ChurnKpis, HistogramBucket, ShapFeature, RiskBySegment, AvgChurnBySeg,
+} from "@/lib/data";
 import { PageTitle, SectionHeading } from "@/components/ui/section-heading";
 import { MetricCard } from "@/components/ui/metric-card";
 import { ChartCard } from "@/components/ui/chart-card";
@@ -13,82 +15,47 @@ import {
 const SEGMENT_COLORS = ["#6366F1", "#A855F7", "#F43F5E", "#F59E0B", "#06B6D4"];
 const TIER_COLORS: Record<string, string> = { "High Risk": "#F43F5E", "Medium Risk": "#F59E0B", "Low Risk": "#10B981" };
 
-interface Props { customers: Customer[] }
+interface Props {
+  kpisAll: ChurnKpis;
+  histAll: HistogramBucket[];
+  shapAll: ShapFeature[];
+  riskSummary: RiskBySegment[];
+  avgChurnBySeg: AvgChurnBySeg[];
+  segmentData: Record<string, { kpis: ChurnKpis; hist: HistogramBucket[]; shap: ShapFeature[] }>;
+}
 
-export function ChurnClient({ customers }: Props) {
+export function ChurnClient({ kpisAll, histAll, shapAll, riskSummary, avgChurnBySeg, segmentData }: Props) {
   const [segFilter, setSegFilter] = useState<string | null>(null);
 
-  const segments = useMemo(() => [...new Set(customers.map((c) => c.segment))].sort(), [customers]);
+  const segments = riskSummary.map((r) => r.segment);
+  const active = segFilter ? (segmentData[segFilter] ?? { kpis: kpisAll, hist: histAll, shap: shapAll }) : { kpis: kpisAll, hist: histAll, shap: shapAll };
+  const kpis = active.kpis;
 
-  const filtered = useMemo(
-    () => (segFilter ? customers.filter((c) => c.segment === segFilter) : customers),
-    [customers, segFilter]
+  const probHist = active.hist.map((b) => ({
+    range: `${b.bucket * 10}–${b.bucket * 10 + 10}%`,
+    count: b.count,
+  }));
+
+  const shapData = active.shap.map((f) => ({ feature: f.feature, importance: f.avg_importance }));
+
+  const tierBySeg = riskSummary.map((r, i) => ({
+    segment: r.segment,
+    "High Risk": r.high_risk,
+    "Medium Risk": r.medium_risk,
+    "Low Risk": r.low_risk,
+    color: SEGMENT_COLORS[i % SEGMENT_COLORS.length],
+  }));
+
+  const histColors = Array.from({ length: 10 }, (_, i) =>
+    i >= 7 ? "#F43F5E" : i >= 4 ? "#F59E0B" : "#10B981"
   );
-
-  const kpis = useMemo(() => {
-    const highRisk = filtered.filter((c) => c.risk_tier === "High Risk").length;
-    const avgProb = filtered.reduce((s, c) => s + c.churn_probability, 0) / (filtered.length || 1);
-    const actualChurners = filtered.filter((c) => c.churn === 1).length;
-    return { highRisk, avgProb, actualChurners, total: filtered.length };
-  }, [filtered]);
-
-  // Probability histogram (buckets 0–10%, 10–20%, … 90–100%)
-  const probHist = useMemo(() => {
-    const buckets = Array.from({ length: 10 }, (_, i) => ({
-      range: `${i * 10}–${(i + 1) * 10}%`,
-      count: 0,
-    }));
-    for (const c of filtered) {
-      const idx = Math.min(Math.floor(c.churn_probability * 10), 9);
-      buckets[idx].count++;
-    }
-    return buckets;
-  }, [filtered]);
-
-  // Risk tier grouped by segment
-  const tierBySeg = useMemo(() => {
-    const segs = segments;
-    return segs.map((seg, si) => {
-      const rows = customers.filter((c) => c.segment === seg);
-      return {
-        segment: seg,
-        "High Risk":   rows.filter((c) => c.risk_tier === "High Risk").length,
-        "Medium Risk": rows.filter((c) => c.risk_tier === "Medium Risk").length,
-        "Low Risk":    rows.filter((c) => c.risk_tier === "Low Risk").length,
-        color: SEGMENT_COLORS[si % SEGMENT_COLORS.length],
-      };
-    });
-  }, [customers, segments]);
-
-  // SHAP bar — top features by avg |SHAP| for the filtered set
-  const shapData = useMemo(() => {
-    const totals: Record<string, { sum: number; count: number }> = {};
-    for (const c of filtered) {
-      const shap = (c.top_shap_features as Record<string, number>) ?? {};
-      for (const [feat, val] of Object.entries(shap)) {
-        if (!totals[feat]) totals[feat] = { sum: 0, count: 0 };
-        totals[feat].sum += Math.abs(val);
-        totals[feat].count++;
-      }
-    }
-    return Object.entries(totals)
-      .map(([feature, { sum, count }]) => ({ feature, importance: sum / count }))
-      .sort((a, b) => b.importance - a.importance)
-      .slice(0, 8);
-  }, [filtered]);
-
-  const histColors = probHist.map((_, i) => {
-    if (i >= 7) return "#F43F5E";
-    if (i >= 4) return "#F59E0B";
-    return "#10B981";
-  });
 
   return (
     <div>
       <PageTitle>Churn Risk Dashboard</PageTitle>
 
       <div className="bg-[#FFF1F2] border-l-4 border-[#F43F5E] rounded-r-xl px-4 py-3 mb-6 text-[14px] text-[#7F1D1D]">
-        <strong>What this page shows:</strong> The XGBoost churn model scored every customer with a probability of churning (0–100%). This page breaks that down by segment, risk tier, and the specific features (SHAP values) driving each score. Use the <strong>segment filter below</strong> to zoom into one group — all four charts update together to reflect only those customers.
+        <strong>What this page shows:</strong> The XGBoost churn model scored every customer with a probability of churning (0–100%). This page breaks that down by segment, risk tier, and the specific features (SHAP values) driving each score. Use the <strong>segment filter below</strong> to zoom into one group — all four charts update together.
       </div>
 
       {/* Segment filter chips */}
@@ -117,22 +84,22 @@ export function ChurnClient({ customers }: Props) {
         ))}
         {segFilter && (
           <span className="text-[12px] text-[#6B7280] ml-2 italic">
-            Showing {kpis.total.toLocaleString()} customers in <strong>{segFilter}</strong> — all charts reflect this filter.
+            Showing <strong>{segFilter}</strong> — all charts reflect this filter.
           </span>
         )}
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <MetricCard label="Total Customers" value={kpis.total.toLocaleString()} accentColor="#6366F1" />
-        <MetricCard label="High Risk" value={kpis.highRisk.toLocaleString()} delta={`${((kpis.highRisk / kpis.total) * 100).toFixed(1)}% of group`} accentColor="#F43F5E" />
-        <MetricCard label="Avg Churn Prob" value={`${(kpis.avgProb * 100).toFixed(1)}%`} accentColor="#F59E0B" />
-        <MetricCard label="Actual Churners" value={kpis.actualChurners.toLocaleString()} delta={`${((kpis.actualChurners / kpis.total) * 100).toFixed(1)}% observed`} accentColor="#A855F7" />
+        <MetricCard label="High Risk" value={kpis.high_risk.toLocaleString()} delta={kpis.total ? `${((kpis.high_risk / kpis.total) * 100).toFixed(1)}% of group` : "—"} accentColor="#F43F5E" />
+        <MetricCard label="Avg Churn Prob" value={`${(kpis.avg_churn_prob * 100).toFixed(1)}%`} accentColor="#F59E0B" />
+        <MetricCard label="Actual Churners" value={kpis.actual_churners.toLocaleString()} delta={kpis.total ? `${((kpis.actual_churners / kpis.total) * 100).toFixed(1)}% observed` : "—"} accentColor="#A855F7" />
       </div>
 
       {/* Probability distribution */}
       <SectionHeading>Churn Probability Distribution</SectionHeading>
       <div className="bg-[#FFF1F2] border border-[#FECDD3] rounded-xl px-4 py-2.5 mb-3 text-[13px] text-[#9F1239]">
-        How many customers fall into each 10%-wide risk bucket. <span className="font-semibold text-[#10B981]">Green bars (0–40%)</span> = low risk, light-touch nurture. <span className="font-semibold text-[#F59E0B]">Amber (40–70%)</span> = medium risk, monitor closely. <span className="font-semibold text-[#F43F5E]">Red (70–100%)</span> = high risk, immediate intervention needed before they cancel.
+        How many customers fall into each 10%-wide risk bucket. <span className="font-semibold text-[#10B981]">Green (0–40%)</span> = low risk. <span className="font-semibold text-[#F59E0B]">Amber (40–70%)</span> = medium risk. <span className="font-semibold text-[#F43F5E]">Red (70–100%)</span> = high risk — immediate intervention needed.
       </div>
       <ChartCard>
         <ResponsiveContainer width="100%" height={420}>
@@ -153,7 +120,7 @@ export function ChurnClient({ customers }: Props) {
       {/* Risk tier by segment */}
       <SectionHeading>Risk Tier Breakdown by Segment</SectionHeading>
       <div className="bg-[#FFF1F2] border border-[#FECDD3] rounded-xl px-4 py-2.5 mb-3 text-[13px] text-[#9F1239]">
-        Stacked bars show the absolute number of High / Medium / Low risk customers in each segment. A segment dominated by <span className="font-semibold text-[#F43F5E]">red</span> needs an urgent campaign; mostly <span className="font-semibold text-[#10B981]">green</span> only needs light-touch nurture. This always shows all segments regardless of the segment filter above, so you can compare them side by side.
+        Absolute count of High / Medium / Low risk customers per segment. Always shows all segments for comparison — not affected by the segment filter above.
       </div>
       <ChartCard>
         <ResponsiveContainer width="100%" height={400}>
@@ -175,7 +142,7 @@ export function ChurnClient({ customers }: Props) {
       {/* SHAP feature importance */}
       <SectionHeading>Top Churn Drivers — SHAP Feature Importance</SectionHeading>
       <div className="bg-[#EEF2FF] border border-[#DDD6FE] rounded-xl px-4 py-2.5 mb-3 text-[13px] text-[#4338CA]">
-        SHAP (SHapley Additive exPlanations) measures exactly how much each feature pushes the churn probability up or down for each customer. This shows the average importance across {segFilter ? `the ${segFilter} segment` : "all customers"}. <strong>Longer bar = bigger influence on whether someone churns.</strong> These are the levers your retention campaigns should pull first — target the top driver with your most impactful offer.
+        Average |SHAP| value per feature for {segFilter ? `the ${segFilter} segment` : "all customers"}. Longer bar = bigger influence on churn probability.
       </div>
       <ChartCard>
         <ResponsiveContainer width="100%" height={400}>
@@ -186,10 +153,7 @@ export function ChurnClient({ customers }: Props) {
             <Tooltip contentStyle={{ borderRadius: "10px", border: "2px solid #DDD6FE", fontSize: 13 }} formatter={(v) => [Number(v).toFixed(4), "Avg |SHAP|"]} />
             <Bar dataKey="importance" name="Importance" radius={[0, 5, 5, 0]}>
               {shapData.map((_, i) => (
-                <Cell key={i} fill={
-                  i === 0 ? "#F43F5E" : i === 1 ? "#F97316" : i === 2 ? "#F59E0B" :
-                  i === 3 ? "#6366F1" : i === 4 ? "#A855F7" : "#06B6D4"
-                } />
+                <Cell key={i} fill={["#F43F5E","#F97316","#F59E0B","#6366F1","#A855F7","#06B6D4","#10B981","#EC4899"][i % 8]} />
               ))}
             </Bar>
           </BarChart>
@@ -199,20 +163,14 @@ export function ChurnClient({ customers }: Props) {
       <div className="h-8" />
 
       {/* Avg churn prob by segment */}
-
       <SectionHeading>Average Churn Probability by Segment</SectionHeading>
       <div className="bg-[#EEF2FF] border border-[#DDD6FE] rounded-xl px-4 py-2.5 mb-3 text-[13px] text-[#4338CA]">
-        Compares the mean predicted churn probability across all 5 segments. Higher bar = higher urgency for that group. Use this to prioritise which segment to run your next retention campaign against.
+        Mean predicted churn probability per segment. Higher bar = higher urgency for that group.
       </div>
       <ChartCard>
         <ResponsiveContainer width="100%" height={340}>
           <BarChart
-            data={segments.map((seg, i) => ({
-              segment: seg,
-              avgProb: customers.filter((c) => c.segment === seg).reduce((s, c) => s + c.churn_probability, 0) /
-                (customers.filter((c) => c.segment === seg).length || 1),
-              color: SEGMENT_COLORS[i % SEGMENT_COLORS.length],
-            }))}
+            data={avgChurnBySeg.map((r, i) => ({ segment: r.segment, avgProb: r.avg_churn_prob, color: SEGMENT_COLORS[i % SEGMENT_COLORS.length] }))}
             layout="vertical"
             margin={{ top: 10, right: 40, left: 130, bottom: 10 }}
           >
@@ -221,7 +179,7 @@ export function ChurnClient({ customers }: Props) {
             <YAxis type="category" dataKey="segment" tick={{ fontSize: 12, fill: "#1E1B4B" }} width={125} />
             <Tooltip contentStyle={{ borderRadius: "10px", border: "2px solid #DDD6FE", fontSize: 13 }} formatter={(v) => [`${(Number(v) * 100).toFixed(1)}%`, "Avg Churn Prob"]} />
             <Bar dataKey="avgProb" name="Avg Churn Prob" radius={[0, 5, 5, 0]}>
-              {segments.map((_, i) => <Cell key={i} fill={SEGMENT_COLORS[i % SEGMENT_COLORS.length]} />)}
+              {avgChurnBySeg.map((_, i) => <Cell key={i} fill={SEGMENT_COLORS[i % SEGMENT_COLORS.length]} />)}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
@@ -232,12 +190,12 @@ export function ChurnClient({ customers }: Props) {
         <p className="text-[12px] font-bold uppercase tracking-wide text-[#64748B] mb-3">Parameter Glossary</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[13px]">
           {[
-            ["Churn Probability", "The XGBoost model's predicted probability (0–100%) that a customer will leave. Each segment has its own model trained separately."],
-            ["Risk Tier", "Churn probability bucketed into three tiers: Low Risk (0–30%), Medium Risk (30–60%), High Risk (60–100%)."],
-            ["SHAP Value", "SHapley Additive exPlanations — measures how much each feature pushes the churn probability up or down for an individual customer. Positive = increases churn risk."],
-            ["Segment Filter", "Selecting a segment updates the probability histogram and SHAP chart to show only those customers. Use this to understand what drives churn within one group specifically."],
-            ["Complain", "Whether a customer has filed a complaint (1=yes, 0=no). One of the strongest churn predictors — unresolved complaints are a leading indicator of cancellation."],
-            ["SatisfactionScore", "Customer-reported satisfaction (1=best, 5=worst). Inverted in the SupportRiskScore composite feature."],
+            ["Churn Probability", "The XGBoost model's predicted probability (0–100%) that a customer will leave."],
+            ["Risk Tier", "Bucketed into: Low Risk (0–30%), Medium Risk (30–60%), High Risk (60–100%)."],
+            ["SHAP Value", "How much each feature pushes the churn probability up or down. Positive = increases churn risk."],
+            ["Segment Filter", "Updates the probability histogram and SHAP chart to show only that segment."],
+            ["Complain", "Whether a customer filed a complaint (1=yes, 0=no). One of the strongest churn predictors."],
+            ["SatisfactionScore", "Customer-reported satisfaction (1=best, 5=worst)."],
           ].map(([term, def]) => (
             <div key={term} className="flex gap-2">
               <span className="font-semibold text-[#4338CA] shrink-0">{term}:</span>

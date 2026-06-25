@@ -184,6 +184,26 @@ export async function getUpliftKpis(): Promise<UpliftKpis> {
   return (data?.[0] ?? { persuadable_count: 0, positive_roi_count: 0, avg_uplift_score: 0, total_roi_potential: 0 }) as UpliftKpis;
 }
 
+// ── Retention page list ───────────────────────────────────────────────────────
+export type PersuadableCustomer = {
+  customer_id: string;
+  segment: string;
+  churn_probability: number;
+  uplift_score: number;
+  net_roi: number;
+  customer_type: string;
+};
+export async function getPersuadablesList(limit = 100): Promise<PersuadableCustomer[]> {
+  const { data, error } = await supabase
+    .from("customers")
+    .select("customer_id, segment, churn_probability, uplift_score, net_roi, customer_type")
+    .eq("customer_type", "Persuadable")
+    .order("net_roi", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as PersuadableCustomer[];
+}
+
 // ── Retention / audit ─────────────────────────────────────────────────────────
 export async function getRetentionActions(limit = 200): Promise<RetentionAction[]> {
   const [{ data: actions, error }, { data: feedback }] = await Promise.all([

@@ -9,7 +9,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-key"
 );
 
-const MODEL = "qwen-qwq-32b";
+const MODEL = "llama-3.3-70b-versatile";
 const MAX_ROUNDS = 5;
 
 // ─── Tool definitions ──────────────────────────────────────────────────────────
@@ -211,7 +211,7 @@ async function runAgentLoop(
       messages: apiMessages,
       tools: TOOLS,
       tool_choice: "auto",
-      max_tokens: 8000, // reasoning model needs more tokens for think + answer
+      max_tokens: 4096,
     });
 
     const msg = completion.choices[0].message;
@@ -247,7 +247,7 @@ async function runAgentLoop(
   const final = await groq.chat.completions.create({
     model: MODEL,
     messages: [...apiMessages, { role: "user", content: "Summarise findings and give a final recommendation now." }],
-    max_tokens: 2000,
+    max_tokens: 1500,
   });
   return { response: stripThinking(final.choices[0].message.content ?? ""), trace };
 }

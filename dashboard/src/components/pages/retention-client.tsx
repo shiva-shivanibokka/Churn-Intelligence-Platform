@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Customer } from "@/lib/supabase";
+import { PersuadableCustomer } from "@/lib/data";
 import { PageTitle, SectionHeading } from "@/components/ui/section-heading";
 import { MetricCard } from "@/components/ui/metric-card";
 
-interface Props { customers: Customer[] }
+interface Props { persuadables: PersuadableCustomer[] }
 
 type Action = {
   customer_id: string;
@@ -26,7 +26,7 @@ type Action = {
   trace?: unknown[];
 };
 
-export function RetentionClient({ customers }: Props) {
+export function RetentionClient({ persuadables }: Props) {
   const [selectedId, setSelectedId] = useState("");
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<Action | null>(null);
@@ -35,12 +35,7 @@ export function RetentionClient({ customers }: Props) {
   const [chatLoading, setChatLoading] = useState(false);
   const [tab, setTab] = useState<"batch" | "chat">("batch");
 
-  const persuadables = useMemo(
-    () => customers.filter((c) => c.customer_type === "Persuadable").sort((a, b) => b.net_roi - a.net_roi),
-    [customers]
-  );
-
-  const selected = useMemo(() => customers.find((c) => c.customer_id === selectedId), [customers, selectedId]);
+  const selected = useMemo(() => persuadables.find((c) => c.customer_id === selectedId), [persuadables, selectedId]);
 
   async function generateAction() {
     if (!selected) return;
