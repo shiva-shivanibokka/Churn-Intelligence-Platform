@@ -36,12 +36,18 @@ type TraceStep = {
 type ChatMessage = { role: string; content: string; trace?: TraceStep[] };
 
 const TOOL_META: Record<string, { label: string; color: string }> = {
-  get_top_churn_drivers:      { label: "Top Churn Drivers",       color: "#F43F5E" },
-  lookup_customer_details:    { label: "Customer Details",        color: "#6366F1" },
-  get_segment_benchmark:      { label: "Segment Benchmark",       color: "#A855F7" },
-  get_all_segment_benchmarks: { label: "All Segment Benchmarks",  color: "#A855F7" },
-  search_retention_playbook:  { label: "Retention Playbook",      color: "#F59E0B" },
-  calculate_intervention_roi: { label: "ROI Calculation",         color: "#10B981" },
+  get_top_churn_drivers:          { label: "Top Churn Drivers",          color: "#F43F5E" },
+  lookup_customer_details:        { label: "Customer Details",           color: "#6366F1" },
+  get_segment_benchmark:          { label: "Segment Benchmark",          color: "#A855F7" },
+  get_all_segment_benchmarks:     { label: "All Segment Benchmarks",     color: "#A855F7" },
+  search_retention_playbook:      { label: "Retention Playbook",         color: "#F59E0B" },
+  calculate_intervention_roi:     { label: "ROI Calculation",            color: "#10B981" },
+  get_past_interventions:         { label: "Past Interventions",         color: "#0EA5E9" },
+  get_intervention_success_rates: { label: "Success Rates by Type",      color: "#0EA5E9" },
+  get_at_risk_customers:          { label: "At-Risk Customers",          color: "#EF4444" },
+  get_revenue_at_risk:            { label: "Revenue at Risk",            color: "#F97316" },
+  save_retention_action:          { label: "Save Action to Database",    color: "#10B981" },
+  get_unactioned_persuadables:    { label: "Unactioned Persuadables",    color: "#8B5CF6" },
 };
 
 function renderToolResult(tool: string, result: Record<string, unknown>) {
@@ -148,6 +154,137 @@ function renderToolResult(tool: string, result: Record<string, unknown>) {
           <div><span className="text-[#7C3AED] font-semibold">ROI %: </span><span className="font-bold">{Number(result.roi_pct ?? 0).toFixed(0)}%</span></div>
         </div>
         <p className={`font-semibold text-[12px] ${net >= 0 ? "text-[#10B981]" : "text-[#EF4444]"}`}>{String(result.recommendation ?? "")}</p>
+      </div>
+    );
+  }
+  if (tool === "get_past_interventions") {
+    if (result.message) return <p className="text-[12px] text-[#0EA5E9] italic">{String(result.message)}</p>;
+    const rows = Array.isArray(result) ? result as Record<string, unknown>[] : [];
+    return (
+      <div className="space-y-2">
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-center gap-3 text-[12px]">
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${r.outcome === "retained" ? "bg-[#D1FAE5] text-[#065F46]" : r.outcome === "churned" ? "bg-[#FEE2E2] text-[#991B1B]" : "bg-[#F3F4F6] text-[#6B7280]"}`}>
+              {String(r.outcome)}
+            </span>
+            <span className="font-semibold text-[#1E1B4B]">{String(r.intervention_type ?? "—")}</span>
+            <span className="text-[#6B7280]">via {String(r.channel ?? "—")}</span>
+            <span className="text-[#9CA3AF] ml-auto shrink-0">{r.generated_at ? new Date(String(r.generated_at)).toLocaleDateString() : "—"}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (tool === "get_intervention_success_rates") {
+    const rows = Array.isArray(result) ? result as Record<string, unknown>[] : [];
+    return (
+      <div className="overflow-x-auto">
+        <table className="text-[11px] w-full border-collapse">
+          <thead><tr className="bg-[#EFF6FF]">
+            {["Intervention Type", "Total", "With Feedback", "Retention Rate"].map((h) => (
+              <th key={h} className="text-left px-2 py-1 text-[#0EA5E9] font-bold border-b border-[#BFDBFE]">{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>{rows.map((r) => {
+            const rate = String(r.retention_rate ?? "—");
+            const rateNum = parseInt(rate);
+            return (
+              <tr key={String(r.intervention_type)} className="border-b border-[#F0F9FF]">
+                <td className="px-2 py-1 font-semibold">{String(r.intervention_type)}</td>
+                <td className="px-2 py-1">{String(r.total_actions)}</td>
+                <td className="px-2 py-1">{String(r.with_feedback)}</td>
+                <td className={`px-2 py-1 font-bold ${!isNaN(rateNum) ? (rateNum >= 70 ? "text-[#10B981]" : rateNum >= 40 ? "text-[#F59E0B]" : "text-[#EF4444]") : "text-[#9CA3AF] italic"}`}>
+                  {rate}
+                </td>
+              </tr>
+            );
+          })}</tbody>
+        </table>
+      </div>
+    );
+  }
+  if (tool === "get_at_risk_customers") {
+    if (result.message) return <p className="text-[12px] text-[#EF4444] italic">{String(result.message)}</p>;
+    const rows = Array.isArray(result) ? result as Record<string, unknown>[] : [];
+    return (
+      <div className="overflow-x-auto">
+        <table className="text-[11px] w-full border-collapse">
+          <thead><tr className="bg-[#FEF2F2]">
+            {["Customer ID", "Segment", "Churn Prob", "Type", "Uplift", "Net ROI"].map((h) => (
+              <th key={h} className="text-left px-2 py-1 text-[#EF4444] font-bold border-b border-[#FECACA]">{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>{rows.map((r) => (
+            <tr key={String(r.customer_id)} className="border-b border-[#FFF5F5]">
+              <td className="px-2 py-1 font-mono text-[#4F46E5]">{String(r.customer_id)}</td>
+              <td className="px-2 py-1">{String(r.segment)}</td>
+              <td className="px-2 py-1 font-bold text-[#EF4444]">{String(r.churn_probability)}</td>
+              <td className="px-2 py-1">{String(r.customer_type)}</td>
+              <td className="px-2 py-1">{String(r.uplift_score)}</td>
+              <td className="px-2 py-1 text-[#10B981]">{String(r.net_roi)}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    );
+  }
+  if (tool === "get_revenue_at_risk") {
+    const total = String(result.total_revenue_at_risk ?? "—");
+    const bySegment = Array.isArray(result.by_segment) ? result.by_segment as Record<string, unknown>[] : [];
+    return (
+      <div className="space-y-2">
+        <div className="flex gap-6 text-[12px]">
+          <div><span className="text-[#F97316] font-semibold">Total at Risk: </span><span className="font-bold text-[14px]">{total}</span></div>
+          {result.total_expected_churners !== undefined && (
+            <div><span className="text-[#F97316] font-semibold">Expected Churners: </span><span className="font-bold">{String(result.total_expected_churners)}</span></div>
+          )}
+        </div>
+        {bySegment.length > 0 && (
+          <div className="space-y-1">
+            {bySegment.map((s) => (
+              <div key={String(s.segment)} className="flex items-center gap-2 text-[11px]">
+                <span className="w-36 font-semibold text-[#1E1B4B] shrink-0">{String(s.segment)}</span>
+                <span className="text-[#6B7280]">{String(s.expected_churners)} churners</span>
+                <span className="ml-auto font-bold text-[#F97316]">{String(s.revenue_at_risk)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {result.note != null && <p className="text-[10px] text-[#9CA3AF] italic">{String(result.note)}</p>}
+      </div>
+    );
+  }
+  if (tool === "save_retention_action") {
+    const ok = result.success as boolean;
+    return (
+      <div className={`text-[12px] rounded-lg px-3 py-2 ${ok ? "bg-[#D1FAE5] text-[#065F46]" : "bg-[#FEE2E2] text-[#991B1B]"}`}>
+        <p className="font-bold">{ok ? "✓ Saved" : "✗ Failed"}</p>
+        <p>{String((result.message ?? result.error) ?? "")}</p>
+        {result.action_id != null && <p className="text-[10px] mt-1 opacity-70">ID: {String(result.action_id)}</p>}
+      </div>
+    );
+  }
+  if (tool === "get_unactioned_persuadables") {
+    if (result.message) return <p className="text-[12px] text-[#8B5CF6] italic">{String(result.message)}</p>;
+    const rows = Array.isArray(result) ? result as Record<string, unknown>[] : [];
+    return (
+      <div className="overflow-x-auto">
+        <table className="text-[11px] w-full border-collapse">
+          <thead><tr className="bg-[#F5F3FF]">
+            {["Customer ID", "Segment", "Churn Prob", "Uplift", "Net ROI"].map((h) => (
+              <th key={h} className="text-left px-2 py-1 text-[#7C3AED] font-bold border-b border-[#EDE9FE]">{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>{rows.map((r) => (
+            <tr key={String(r.customer_id)} className="border-b border-[#F3F0FF]">
+              <td className="px-2 py-1 font-mono text-[#4F46E5]">{String(r.customer_id)}</td>
+              <td className="px-2 py-1">{String(r.segment)}</td>
+              <td className="px-2 py-1 font-bold text-[#EF4444]">{String(r.churn_probability)}</td>
+              <td className="px-2 py-1">{String(r.uplift_score)}</td>
+              <td className="px-2 py-1 font-bold text-[#10B981]">{String(r.net_roi)}</td>
+            </tr>
+          ))}</tbody>
+        </table>
       </div>
     );
   }

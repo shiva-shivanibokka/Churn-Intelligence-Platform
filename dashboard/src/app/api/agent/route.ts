@@ -87,6 +87,85 @@ const TOOLS: ChatCompletionTool[] = [
       parameters: { type: "object", properties: {} },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "get_past_interventions",
+      description: "Returns all previously generated retention actions and their outcomes for a specific customer. ALWAYS call this before recommending an intervention to avoid repeating failed approaches.",
+      parameters: {
+        type: "object",
+        properties: { customer_id: { type: "string", description: "The customer ID to look up history for." } },
+        required: ["customer_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_intervention_success_rates",
+      description: "Returns historical retention rates by intervention type across all customers who have outcome data. Use this to recommend the most effective intervention types.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_at_risk_customers",
+      description: "Returns the top high-risk customers by churn probability. Optionally filter by a specific segment. Use when the manager asks who to prioritise or who to contact.",
+      parameters: {
+        type: "object",
+        properties: {
+          segment: { type: "string", description: "Optional segment name to filter by. Omit for all segments." },
+          limit: { type: "number", description: "Max customers to return (default 10, max 25)." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_revenue_at_risk",
+      description: "Estimates total revenue at risk from predicted churners using expected churn probability × assumed CLV. Optionally filter by segment.",
+      parameters: {
+        type: "object",
+        properties: {
+          segment: { type: "string", description: "Optional segment name. Omit for all segments." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "save_retention_action",
+      description: "Saves a retention action plan to the database. Only call this when the user explicitly asks to save or schedule the intervention. Returns the saved action ID.",
+      parameters: {
+        type: "object",
+        properties: {
+          customer_id:        { type: "string" },
+          intervention_type:  { type: "string" },
+          channel:            { type: "string" },
+          timing:             { type: "string" },
+          message_framing:    { type: "string" },
+          confidence:         { type: "string" },
+        },
+        required: ["customer_id", "intervention_type", "channel", "timing", "message_framing"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_unactioned_persuadables",
+      description: "Returns persuadable customers who have NOT yet had a retention action generated — the highest-priority untouched leads ordered by net ROI.",
+      parameters: {
+        type: "object",
+        properties: {
+          limit: { type: "number", description: "Max customers to return (default 10)." },
+        },
+      },
+    },
+  },
 ];
 
 // ─── Tool execution ────────────────────────────────────────────────────────────
@@ -183,6 +262,173 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
     }));
   }
 
+  if (name === "get_past_interventions") {
+    const { data: actions } = await supabase
+      .from("retention_actions")
+      .select("id, intervention_type, channel, timing, generated_at")
+      .eq("customer_id", String(args.customer_id))
+      .order("generated_at", { ascending: false })
+      .limit(10);
+    if (!actions || actions.length === 0)
+      return { message: `No previous interventions for customer ${args.customer_id}. This would be the first.` };
+    const actionIds = (actions as Record<string, unknown>[]).map((a) => a.id as string);
+    const { data: feedback } = await supabase
+      .from("intervention_feedback")
+      .select("retention_action_id, outcome")
+      .in("retention_action_id", actionIds);
+    const fbMap: Record<string, string> = Object.fromEntries(
+      ((feedback ?? []) as Record<string, unknown>[]).map((f) => [f.retention_action_id as string, f.outcome as string])
+    );
+    return (actions as Record<string, unknown>[]).map((a) => ({
+      intervention_type: a.intervention_type,
+      channel: a.channel,
+      timing: a.timing,
+      generated_at: a.generated_at,
+      outcome: fbMap[a.id as string] ?? "pending",
+    }));
+  }
+
+  if (name === "get_intervention_success_rates") {
+    const [{ data: actions }, { data: feedback }] = await Promise.all([
+      supabase.from("retention_actions").select("id, intervention_type"),
+      supabase.from("intervention_feedback").select("retention_action_id, outcome"),
+    ]);
+    if (!actions) return { error: "No action data available" };
+    const fbMap: Record<string, string> = Object.fromEntries(
+      ((feedback ?? []) as Record<string, unknown>[]).map((f) => [f.retention_action_id as string, f.outcome as string])
+    );
+    const byType: Record<string, { total: number; retained: number; withFeedback: number }> = {};
+    for (const a of actions as Record<string, unknown>[]) {
+      const t = String(a.intervention_type ?? "Unknown");
+      if (!byType[t]) byType[t] = { total: 0, retained: 0, withFeedback: 0 };
+      byType[t].total++;
+      const outcome = fbMap[a.id as string];
+      if (outcome) { byType[t].withFeedback++; if (outcome === "retained") byType[t].retained++; }
+    }
+    return Object.entries(byType)
+      .map(([type, v]) => ({
+        intervention_type: type,
+        total_actions: v.total,
+        with_feedback: v.withFeedback,
+        retention_rate: v.withFeedback > 0 ? `${Math.round((v.retained / v.withFeedback) * 100)}%` : "No outcome data yet",
+      }))
+      .sort((a, b) => b.total_actions - a.total_actions);
+  }
+
+  if (name === "get_at_risk_customers") {
+    const limit = Math.min(Number(args.limit ?? 10), 25);
+    let query = supabase
+      .from("customers")
+      .select("customer_id, segment, churn_probability, risk_tier, customer_type, uplift_score, net_roi")
+      .eq("risk_tier", "High Risk")
+      .order("churn_probability", { ascending: false })
+      .limit(limit);
+    if (args.segment) query = query.eq("segment", String(args.segment));
+    const { data } = await query;
+    if (!data || data.length === 0) return { message: "No high-risk customers found for the given filter." };
+    return (data as Record<string, unknown>[]).map((c) => ({
+      customer_id: c.customer_id,
+      segment: c.segment,
+      churn_probability: `${(Number(c.churn_probability) * 100).toFixed(1)}%`,
+      customer_type: c.customer_type,
+      uplift_score: `${(Number(c.uplift_score) * 100).toFixed(2)}%`,
+      net_roi: `$${Number(c.net_roi).toFixed(2)}`,
+    }));
+  }
+
+  if (name === "get_revenue_at_risk") {
+    const ASSUMED_CLV = 500;
+    if (args.segment) {
+      const { data } = await supabase.rpc("get_churn_kpis", { p_segment: String(args.segment) });
+      if (!data) return { error: `No data for segment: ${args.segment}` };
+      const k = data as { total: number; avg_churn_prob: number };
+      const expected = Math.round(k.total * k.avg_churn_prob);
+      return {
+        segment: args.segment,
+        total_customers: k.total,
+        avg_churn_prob: `${(k.avg_churn_prob * 100).toFixed(1)}%`,
+        expected_churners: expected,
+        estimated_revenue_at_risk: `$${(expected * ASSUMED_CLV).toLocaleString()}`,
+        note: `Assumes $${ASSUMED_CLV} CLV per customer.`,
+      };
+    } else {
+      const { data } = await supabase.rpc("get_segment_summary");
+      if (!data) return { error: "Could not fetch segment summary" };
+      let totalExpected = 0;
+      const breakdown = (data as Record<string, unknown>[]).map((s) => {
+        const exp = Math.round(Number(s.customer_count) * Number(s.avg_churn_prob));
+        totalExpected += exp;
+        return { segment: s.segment, expected_churners: exp, revenue_at_risk: `$${(exp * ASSUMED_CLV).toLocaleString()}` };
+      });
+      return {
+        total_expected_churners: totalExpected,
+        total_revenue_at_risk: `$${(totalExpected * ASSUMED_CLV).toLocaleString()}`,
+        by_segment: breakdown,
+        note: `Assumes $${ASSUMED_CLV} CLV per customer.`,
+      };
+    }
+  }
+
+  if (name === "save_retention_action") {
+    const customer_id = String(args.customer_id);
+    const { data: customer } = await supabase
+      .from("customers")
+      .select("segment, churn_probability, uplift_score, net_roi")
+      .eq("customer_id", customer_id)
+      .single();
+    const { data, error } = await supabase
+      .from("retention_actions")
+      .insert({
+        customer_id,
+        segment: (customer as Record<string, unknown> | null)?.segment ?? null,
+        churn_probability: (customer as Record<string, unknown> | null)?.churn_probability ?? null,
+        uplift_score: (customer as Record<string, unknown> | null)?.uplift_score ?? null,
+        net_roi: (customer as Record<string, unknown> | null)?.net_roi ?? null,
+        intervention_type: String(args.intervention_type),
+        channel: String(args.channel),
+        timing: String(args.timing),
+        message_framing: String(args.message_framing),
+        agent_reasoning: null,
+        agentic_mode: true,
+      })
+      .select("id")
+      .single();
+    if (error) return { error: `Failed to save action: ${error.message}` };
+    return {
+      success: true,
+      action_id: (data as Record<string, unknown>)?.id,
+      message: `Retention action saved for customer ${customer_id}. It will appear in Audit & Analytics.`,
+    };
+  }
+
+  if (name === "get_unactioned_persuadables") {
+    const limit = Math.min(Number(args.limit ?? 10), 25);
+    const { data: persuadables } = await supabase
+      .from("customers")
+      .select("customer_id, segment, churn_probability, uplift_score, net_roi")
+      .eq("customer_type", "Persuadable")
+      .order("net_roi", { ascending: false })
+      .limit(100);
+    if (!persuadables || persuadables.length === 0) return { message: "No persuadable customers found." };
+    const ids = (persuadables as Record<string, unknown>[]).map((p) => p.customer_id as string);
+    const { data: actioned } = await supabase
+      .from("retention_actions")
+      .select("customer_id")
+      .in("customer_id", ids);
+    const actionedSet = new Set(((actioned ?? []) as Record<string, unknown>[]).map((a) => a.customer_id as string));
+    const unactioned = (persuadables as Record<string, unknown>[])
+      .filter((p) => !actionedSet.has(p.customer_id as string))
+      .slice(0, limit);
+    if (unactioned.length === 0) return { message: "All top persuadables already have actions generated." };
+    return unactioned.map((c) => ({
+      customer_id: c.customer_id,
+      segment: c.segment,
+      churn_probability: `${(Number(c.churn_probability) * 100).toFixed(1)}%`,
+      uplift_score: `${(Number(c.uplift_score) * 100).toFixed(2)}%`,
+      net_roi: `$${Number(c.net_roi).toFixed(2)}`,
+    }));
+  }
+
   return { error: `Unknown tool: ${name}` };
 }
 
@@ -191,10 +437,14 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
 const TOOL_RULES = `
 TOOL CALLING RULES — follow these exactly:
 - ALWAYS call tools using the official API tool_call mechanism. NEVER write <function=...> or any XML/text-based format.
-- get_top_churn_drivers and lookup_customer_details require a real customer_id string. Never call them without one.
-- get_segment_benchmark requires a specific segment name (e.g. "Loyal Customers", "At-Risk"). NEVER pass "all" as the segment — use get_all_segment_benchmarks instead.
-- get_all_segment_benchmarks takes NO arguments. Use it for any cross-segment or overall question.
-- If the user's question cannot be answered with available tools (e.g. no customer_id provided for a customer-specific question), explain what information you need rather than inventing tool arguments.
+- get_top_churn_drivers, lookup_customer_details, get_past_interventions require a real customer_id. Never call them without one.
+- get_segment_benchmark requires a real segment name (e.g. "Loyal Customers"). NEVER pass "all" — use get_all_segment_benchmarks instead.
+- get_all_segment_benchmarks, get_intervention_success_rates take NO arguments.
+- get_at_risk_customers and get_revenue_at_risk work without a segment (returns all segments); segment is optional.
+- save_retention_action: only call this when the user explicitly asks to save or schedule the plan. It writes to the database.
+- get_unactioned_persuadables: use when the manager asks who hasn't been contacted yet or needs a priority list.
+- get_past_interventions: ALWAYS call this before recommending an intervention for a specific customer.
+- If a question needs a customer_id you don't have, ask the user for it rather than inventing one.
 `;
 
 const SYSTEM_BATCH = `You are a Customer Success AI generating structured retention action plans.
