@@ -236,17 +236,16 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
 
   if (name === "search_retention_playbook") {
     const riskFactor = String(args.risk_factor).toLowerCase();
-    const playbook: Record<string, unknown> = {
-      satisfaction: { intervention: "Proactive Support Call", message: "Reach out to understand and resolve the satisfaction issue before they escalate.", cost: "Medium ($10–25)" },
-      complain: { intervention: "Service Recovery", message: "Apologise directly, offer a goodwill gesture, and close the loop on the complaint.", cost: "Medium ($10–25)" },
-      days_since_last_order: { intervention: "Reactivation Campaign", message: "Send a personalised win-back offer highlighting new products relevant to past purchases.", cost: "Low ($1–5)" },
-      tenure: { intervention: "Loyalty Reward", message: "Recognise their loyalty with an exclusive member reward to reinforce the relationship.", cost: "Low ($1–5)" },
-      order_count: { intervention: "Personalized Content", message: "Send curated product recommendations based on their purchase history to re-engage browsing.", cost: "Low ($1–5)" },
-      cashback: { intervention: "Discount Offer", message: "Offer a targeted cashback or discount on their next order to incentivise return.", cost: "Low ($1–5)" },
-      default: { intervention: "Personalized Content", message: "Send a personalised re-engagement email with relevant content.", cost: "Low ($1–5)" },
-    };
-    const match = Object.entries(playbook).find(([k]) => riskFactor.includes(k));
-    return match ? match[1] : playbook.default;
+    const { data: rows } = await supabase
+      .from("retention_playbook")
+      .select("risk_factor_keyword, intervention, message, cost");
+    const entries = (rows ?? []) as { risk_factor_keyword: string; intervention: string; message: string; cost: string }[];
+    const match = entries.find((r) => riskFactor.includes(r.risk_factor_keyword) && r.risk_factor_keyword !== "default");
+    const fallback = entries.find((r) => r.risk_factor_keyword === "default");
+    const result = match ?? fallback;
+    return result
+      ? { intervention: result.intervention, message: result.message, cost: result.cost }
+      : { intervention: "Personalized Content", message: "Send a personalised re-engagement email with relevant content.", cost: "Low ($1–5)" };
   }
 
   if (name === "get_all_segment_benchmarks") {
@@ -337,7 +336,12 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
   }
 
   if (name === "get_revenue_at_risk") {
-    const ASSUMED_CLV = 500;
+    const { data: clvRow } = await supabase
+      .from("business_config")
+      .select("value")
+      .eq("key", "assumed_clv_usd")
+      .single();
+    const ASSUMED_CLV = Number((clvRow as { value: string } | null)?.value ?? 500);
     if (args.segment) {
       const { data } = await supabase.rpc("get_churn_kpis", { p_segment: String(args.segment) });
       if (!data) return { error: `No data for segment: ${args.segment}` };
@@ -447,7 +451,44 @@ TOOL CALLING RULES — follow these exactly:
 - If a question needs a customer_id you don't have, ask the user for it rather than inventing one.
 `;
 
-const SYSTEM_BATCH = `You are a Customer Success AI generating structured retention action plans.
+// ─── Config fetcher ────────────────────────────────────────────────────────────
+
+interface AgentConfig {
+  interventionTypes: string;
+  channels: string;
+  timingOptions: string;
+  assumedClv: number;
+}
+
+const CONFIG_FALLBACKS: AgentConfig = {
+  interventionTypes: "Discount Offer,Loyalty Reward,Personalized Content,Proactive Support Call,Reactivation Campaign,Premium Upgrade,Service Recovery",
+  channels: "In-App Notification,Email,Push Notification,Direct Call,SMS",
+  timingOptions: "Immediate,Within 24 hours,Within 1 week,During next session",
+  assumedClv: 500,
+};
+
+async function fetchAgentConfig(): Promise<AgentConfig> {
+  const { data } = await supabase
+    .from("business_config")
+    .select("key, value")
+    .in("key", ["intervention_types", "channels", "timing_options", "assumed_clv_usd"]);
+  const cfg = Object.fromEntries(
+    ((data ?? []) as { key: string; value: string }[]).map((r) => [r.key, r.value])
+  );
+  return {
+    interventionTypes: cfg.intervention_types ?? CONFIG_FALLBACKS.interventionTypes,
+    channels: cfg.channels ?? CONFIG_FALLBACKS.channels,
+    timingOptions: cfg.timing_options ?? CONFIG_FALLBACKS.timingOptions,
+    assumedClv: Number(cfg.assumed_clv_usd ?? CONFIG_FALLBACKS.assumedClv),
+  };
+}
+
+function fmtList(csv: string, sep = " / ") {
+  return csv.split(",").map((s) => s.trim()).join(sep);
+}
+
+function buildSystemBatch(cfg: AgentConfig): string {
+  return `You are a Customer Success AI generating structured retention action plans.
 
 Use the available tools to gather all necessary data before making a recommendation.
 ${TOOL_RULES}
@@ -456,9 +497,9 @@ After calling all relevant tools, output your final recommendation as valid JSON
 {
   "primary_risk_reason": "One sentence describing the main churn driver from SHAP analysis",
   "customer_receptivity": "Assessment of whether intervention will work and why",
-  "intervention_type": "One of: Discount Offer / Loyalty Reward / Personalized Content / Proactive Support Call / Reactivation Campaign / Premium Upgrade / Service Recovery",
-  "channel": "One of: In-App Notification / Email / Push Notification / Direct Call / SMS",
-  "timing": "One of: Immediate / Within 24 hours / Within 1 week / During next session",
+  "intervention_type": "One of: ${fmtList(cfg.interventionTypes)}",
+  "channel": "One of: ${fmtList(cfg.channels)}",
+  "timing": "One of: ${fmtList(cfg.timingOptions)}",
   "message_framing": "2-3 sentence customer-facing message (do not mention ML, churn, or scores)",
   "intervention_cost_estimate": "Low ($1-5) / Medium ($10-25) / High ($50-100)",
   "expected_outcome": "Brief prediction of result if intervention is executed",
@@ -467,10 +508,14 @@ After calling all relevant tools, output your final recommendation as valid JSON
 
 If the customer type is Lost Cause or Sleeping Dog, output:
 {"do_not_intervene_reason": "explanation of why intervention would be counterproductive"}`;
+}
 
-const SYSTEM_CHAT = `You are an AI Customer Success Assistant. You help Customer Success Managers understand customers and decide what retention actions to take.
+function buildSystemChat(cfg: AgentConfig): string {
+  return `You are an AI Customer Success Assistant. You help Customer Success Managers understand customers and decide what retention actions to take.
 ${TOOL_RULES}
+Valid intervention types: ${fmtList(cfg.interventionTypes, ", ")}.
 Be concise and actionable. Use tools to fetch real data before answering. If a question is about all segments or overall trends, use get_all_segment_benchmarks. If a question is about a specific customer, use their customer_id with lookup_customer_details or get_top_churn_drivers.`;
+}
 
 // ─── ReAct loop ────────────────────────────────────────────────────────────────
 
@@ -547,22 +592,23 @@ export async function POST(req: NextRequest) {
       history?: ChatCompletionMessageParam[];
     };
 
+    const cfg = await fetchAgentConfig();
     let messages: ChatCompletionMessageParam[];
 
     if (mode === "batch" && customer) {
       messages = [
-        { role: "system", content: SYSTEM_BATCH },
+        { role: "system", content: buildSystemBatch(cfg) },
         {
           role: "user",
           content: `Generate a retention action plan for customer ${customer.customer_id}. ` +
             `Segment: '${customer.segment}', churn probability: ${(Number(customer.churn_probability) * 100).toFixed(1)}%, ` +
             `uplift score: ${Number(customer.uplift_score).toFixed(3)}, ` +
-            `customer type: '${customer.customer_type}'. CLV assumption: $500. Use tools to gather supporting data first.`,
+            `customer type: '${customer.customer_type}'. Assumed CLV: $${cfg.assumedClv}. Use tools to gather supporting data first.`,
         },
       ];
     } else if (mode === "chat" && message) {
       messages = [
-        { role: "system", content: SYSTEM_CHAT },
+        { role: "system", content: buildSystemChat(cfg) },
         ...(history ?? []),
         { role: "user", content: message },
       ];
