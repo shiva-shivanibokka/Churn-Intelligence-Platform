@@ -3,19 +3,19 @@ import {
   getCustomerTypeSummary,
   getRoiBySegment,
   getTopPersuadables,
-  getCustomers,
+  getUpliftScatterData,
 } from "@/lib/data";
 import { UpliftClient } from "@/components/pages/uplift-client";
 
 export const dynamic = "force-dynamic";
 
 export default async function UpliftPage() {
-  const [kpis, typeSummary, roiBySeg, topPersuadables, customers] = await Promise.all([
+  const [kpis, typeSummary, roiBySeg, topPersuadables, scatter] = await Promise.all([
     getUpliftKpis(),
     getCustomerTypeSummary(),
     getRoiBySegment(),
     getTopPersuadables(15),
-    getCustomers(),
+    getUpliftScatterData(),
   ]);
   return (
     <UpliftClient
@@ -23,7 +23,7 @@ export default async function UpliftPage() {
       typeSummary={typeSummary}
       roiBySeg={roiBySeg}
       topPersuadables={topPersuadables}
-      customers={customers}
+      scatter={scatter}
     />
   );
 }

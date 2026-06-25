@@ -2,8 +2,7 @@
 
 import { useMemo } from "react";
 import dynamic from "next/dynamic";
-import { Customer } from "@/lib/supabase";
-import { UpliftKpis, CustomerTypeSummary, RoiBySegment, TopPersuadable } from "@/lib/data";
+import { UpliftKpis, CustomerTypeSummary, RoiBySegment, TopPersuadable, UpliftScatterPoint } from "@/lib/data";
 import { PageTitle, SectionHeading } from "@/components/ui/section-heading";
 import { MetricCard } from "@/components/ui/metric-card";
 import { ChartCard } from "@/components/ui/chart-card";
@@ -30,15 +29,14 @@ interface Props {
   typeSummary: CustomerTypeSummary[];
   roiBySeg: RoiBySegment[];
   topPersuadables: TopPersuadable[];
-  customers: Customer[];
+  scatter: UpliftScatterPoint[];
 }
 
-export function UpliftClient({ kpis, typeSummary, roiBySeg, topPersuadables, customers }: Props) {
-  // Scatter plot uses sampled customer data for churn_prob vs uplift_score
+export function UpliftClient({ kpis, typeSummary, roiBySeg, topPersuadables, scatter }: Props) {
   const byType = useMemo(() => {
-    const types = [...new Set(customers.map((c) => c.customer_type))];
+    const types = [...new Set(scatter.map((c) => c.customer_type))];
     return types.map((t) => {
-      const rows = customers.filter((c) => c.customer_type === t);
+      const rows = scatter.filter((c) => c.customer_type === t);
       return {
         type: "scatter" as const,
         mode: "markers" as const,
@@ -50,7 +48,7 @@ export function UpliftClient({ kpis, typeSummary, roiBySeg, topPersuadables, cus
         hovertemplate: "%{text}<extra>%{fullData.name}</extra>",
       };
     });
-  }, [customers]);
+  }, [scatter]);
 
   const typeDistribution = useMemo(() =>
     typeSummary.map((t) => ({

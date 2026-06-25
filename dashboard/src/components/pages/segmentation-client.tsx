@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { Customer } from "@/lib/supabase";
-import { SegmentSummaryRow } from "@/lib/data";
+import { SegmentSummaryRow, UmapPoint } from "@/lib/data";
 import { PageTitle, SectionHeading } from "@/components/ui/section-heading";
 import { MetricCard } from "@/components/ui/metric-card";
 import { ChartCard } from "@/components/ui/chart-card";
@@ -73,9 +73,9 @@ const UMAP_CAPTIONS: Record<string, { label: string; caption: string }> = {
   },
 };
 
-interface Props { summary: SegmentSummaryRow[]; customers: Customer[] }
+interface Props { summary: SegmentSummaryRow[]; umap: UmapPoint[]; customers: Customer[] }
 
-export function SegmentationClient({ summary, customers }: Props) {
+export function SegmentationClient({ summary, umap, customers }: Props) {
   const [colorBy, setColorBy] = useState("Segment");
   const [showDefs, setShowDefs] = useState(false);
 
@@ -98,19 +98,24 @@ export function SegmentationClient({ summary, customers }: Props) {
 
   const umapTraces = useMemo(() => {
     if (colorBy === "Segment") {
-      return Object.entries(segments).map(([seg, rows]) => ({
+      const bySegment: Record<string, UmapPoint[]> = {};
+      for (const p of umap) {
+        if (!bySegment[p.segment]) bySegment[p.segment] = [];
+        bySegment[p.segment].push(p);
+      }
+      return Object.entries(bySegment).map(([seg, rows]) => ({
         type: "scatter" as const,
         mode: "markers" as const,
         name: seg,
         x: rows.map((r) => r.umap_1),
         y: rows.map((r) => r.umap_2),
         text: rows.map((r) => `Customer ${r.customer_id}<br>Seg: ${r.segment}<br>Churn Prob: ${(r.churn_probability * 100).toFixed(1)}%`),
-        marker: { size: 8, color: SEGMENT_COLORS[seg] ?? "#6B7280", opacity: 0.80, line: { width: 0.8, color: "white" } },
+        marker: { size: 5, color: SEGMENT_COLORS[seg] ?? "#6B7280", opacity: 0.75, line: { width: 0.5, color: "white" } },
         hovertemplate: "%{text}<extra>%{fullData.name}</extra>",
       }));
     }
 
-    const colorValues = customers.map((c) => {
+    const colorValues = umap.map((c) => {
       if (colorBy === "Churn") return c.churn;
       if (colorBy === "ChurnProbability") return c.churn_probability;
       if (colorBy === "UpliftScore") return c.uplift_score;
@@ -119,7 +124,6 @@ export function SegmentationClient({ summary, customers }: Props) {
     });
 
     const colorscale = colorBy === "UpliftScore" ? COLORSCALE_HIGH_GOOD : COLORSCALE_HIGH_BAD;
-    // For UpliftScore center the scale at 0
     const vals = colorValues as number[];
     const absMax = Math.max(Math.abs(Math.min(...vals)), Math.abs(Math.max(...vals)));
     const cmin = colorBy === "UpliftScore" ? -absMax : undefined;
@@ -129,23 +133,13 @@ export function SegmentationClient({ summary, customers }: Props) {
       type: "scatter" as const,
       mode: "markers" as const,
       name: colorBy,
-      x: customers.map((c) => c.umap_1),
-      y: customers.map((c) => c.umap_2),
-      marker: {
-        size: 8,
-        color: colorValues,
-        colorscale,
-        cmin,
-        cmax,
-        showscale: true,
-        opacity: 0.80,
-        line: { width: 0.8, color: "white" },
-        colorbar: { thickness: 14, len: 0.8, tickfont: { size: 11 } },
-      },
-      text: customers.map((c) => `Customer ${c.customer_id}<br>Seg: ${c.segment}<br>Prob: ${(c.churn_probability * 100).toFixed(1)}%`),
+      x: umap.map((c) => c.umap_1),
+      y: umap.map((c) => c.umap_2),
+      marker: { size: 5, color: colorValues, colorscale, cmin, cmax, showscale: true, opacity: 0.75, line: { width: 0.5, color: "white" }, colorbar: { thickness: 14, len: 0.8, tickfont: { size: 11 } } },
+      text: umap.map((c) => `Customer ${c.customer_id}<br>Seg: ${c.segment}<br>Prob: ${(c.churn_probability * 100).toFixed(1)}%`),
       hovertemplate: "%{text}<extra></extra>",
     }];
-  }, [colorBy, customers, segments]);
+  }, [colorBy, umap]);
 
   const gmmData = useMemo(() => {
     return Object.keys(segments).map((seg) => {

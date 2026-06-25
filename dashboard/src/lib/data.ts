@@ -97,6 +97,45 @@ export async function getAvgChurnBySegment(): Promise<AvgChurnBySeg[]> {
   return data ?? [];
 }
 
+// ── Lightweight scatter data (no full table scan) ────────────────────────────
+export type UpliftScatterPoint = {
+  customer_id: string;
+  customer_type: string;
+  churn_probability: number;
+  uplift_score: number;
+  net_roi: number;
+  segment: string;
+};
+
+export async function getUpliftScatterData(): Promise<UpliftScatterPoint[]> {
+  const { data, error } = await supabase
+    .from("customers")
+    .select("customer_id, customer_type, churn_probability, uplift_score, net_roi, segment")
+    .limit(5000);
+  if (error) throw error;
+  return (data ?? []) as UpliftScatterPoint[];
+}
+
+export type UmapPoint = {
+  customer_id: string;
+  umap_1: number;
+  umap_2: number;
+  segment: string;
+  churn_probability: number;
+  churn: number;
+  risk_tier: string;
+  uplift_score: number;
+};
+
+export async function getUmapData(): Promise<UmapPoint[]> {
+  const { data, error } = await supabase
+    .from("customers")
+    .select("customer_id, umap_1, umap_2, segment, churn_probability, churn, risk_tier, uplift_score")
+    .limit(10000);
+  if (error) throw error;
+  return (data ?? []) as UmapPoint[];
+}
+
 // ── Uplift page RPCs ──────────────────────────────────────────────────────────
 export type CustomerTypeSummary = {
   customer_type: string;
