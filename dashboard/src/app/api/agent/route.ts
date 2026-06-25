@@ -79,6 +79,14 @@ const TOOLS: ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "get_all_segment_benchmarks",
+      description: "Returns churn metrics and risk profiles for ALL segments at once. Use this when the user asks about 'all segments', wants to compare segments, or asks about overall/cross-segment trends — do NOT call get_segment_benchmark with segment='all'.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
 ];
 
 // ─── Tool execution ────────────────────────────────────────────────────────────
@@ -162,15 +170,37 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
     return match ? match[1] : playbook.default;
   }
 
+  if (name === "get_all_segment_benchmarks") {
+    const { data, error } = await supabase.rpc("get_segment_summary");
+    if (error || !data) return { error: "Could not fetch segment data" };
+    return (data as Record<string, unknown>[]).map((s) => ({
+      segment: s.segment,
+      customer_count: s.customer_count,
+      churn_rate: `${(Number(s.churn_rate) * 100).toFixed(1)}%`,
+      avg_churn_prob: `${(Number(s.avg_churn_prob) * 100).toFixed(1)}%`,
+      high_risk_pct: `${(Number(s.high_risk_pct) * 100).toFixed(1)}%`,
+      persuadable_pct: `${(Number(s.persuadable_pct) * 100).toFixed(1)}%`,
+    }));
+  }
+
   return { error: `Unknown tool: ${name}` };
 }
 
 // ─── System prompt ─────────────────────────────────────────────────────────────
 
+const TOOL_RULES = `
+TOOL CALLING RULES — follow these exactly:
+- ALWAYS call tools using the official API tool_call mechanism. NEVER write <function=...> or any XML/text-based format.
+- get_top_churn_drivers and lookup_customer_details require a real customer_id string. Never call them without one.
+- get_segment_benchmark requires a specific segment name (e.g. "Loyal Customers", "At-Risk"). NEVER pass "all" as the segment — use get_all_segment_benchmarks instead.
+- get_all_segment_benchmarks takes NO arguments. Use it for any cross-segment or overall question.
+- If the user's question cannot be answered with available tools (e.g. no customer_id provided for a customer-specific question), explain what information you need rather than inventing tool arguments.
+`;
+
 const SYSTEM_BATCH = `You are a Customer Success AI generating structured retention action plans.
 
 Use the available tools to gather all necessary data before making a recommendation.
-
+${TOOL_RULES}
 After calling all relevant tools, output your final recommendation as valid JSON ONLY (no other text):
 
 {
@@ -188,14 +218,17 @@ After calling all relevant tools, output your final recommendation as valid JSON
 If the customer type is Lost Cause or Sleeping Dog, output:
 {"do_not_intervene_reason": "explanation of why intervention would be counterproductive"}`;
 
-const SYSTEM_CHAT = `You are an AI Customer Success Assistant. You help Customer Success Managers understand customers and decide what retention actions to take. Always use tools to get real data. Be concise and actionable.`;
+const SYSTEM_CHAT = `You are an AI Customer Success Assistant. You help Customer Success Managers understand customers and decide what retention actions to take.
+${TOOL_RULES}
+Be concise and actionable. Use tools to fetch real data before answering. If a question is about all segments or overall trends, use get_all_segment_benchmarks. If a question is about a specific customer, use their customer_id with lookup_customer_details or get_top_churn_drivers.`;
 
 // ─── ReAct loop ────────────────────────────────────────────────────────────────
 
-// qwen-qwq-32b is a reasoning model — it wraps internal thinking in <think>…</think>.
-// Strip that block before returning content to callers or storing in message history.
 function stripThinking(text: string): string {
-  return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<function=[\s\S]*?<\/function>/gi, "")
+    .trim();
 }
 
 async function runAgentLoop(

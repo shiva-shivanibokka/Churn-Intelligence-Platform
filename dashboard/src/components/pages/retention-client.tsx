@@ -36,11 +36,12 @@ type TraceStep = {
 type ChatMessage = { role: string; content: string; trace?: TraceStep[] };
 
 const TOOL_META: Record<string, { label: string; color: string }> = {
-  get_top_churn_drivers:    { label: "Top Churn Drivers",    color: "#F43F5E" },
-  lookup_customer_details:  { label: "Customer Details",     color: "#6366F1" },
-  get_segment_benchmark:    { label: "Segment Benchmark",    color: "#A855F7" },
-  search_retention_playbook:{ label: "Retention Playbook",   color: "#F59E0B" },
-  calculate_intervention_roi:{ label: "ROI Calculation",     color: "#10B981" },
+  get_top_churn_drivers:      { label: "Top Churn Drivers",       color: "#F43F5E" },
+  lookup_customer_details:    { label: "Customer Details",        color: "#6366F1" },
+  get_segment_benchmark:      { label: "Segment Benchmark",       color: "#A855F7" },
+  get_all_segment_benchmarks: { label: "All Segment Benchmarks",  color: "#A855F7" },
+  search_retention_playbook:  { label: "Retention Playbook",      color: "#F59E0B" },
+  calculate_intervention_roi: { label: "ROI Calculation",         color: "#10B981" },
 };
 
 function renderToolResult(tool: string, result: Record<string, unknown>) {
@@ -110,6 +111,30 @@ function renderToolResult(tool: string, result: Record<string, unknown>) {
         <div className="flex gap-1"><span className="text-[#7C3AED] font-semibold">Recommended:</span><span className="text-[#1E1B4B] font-semibold">{String(result.intervention ?? "—")}</span></div>
         <div className="flex gap-1"><span className="text-[#7C3AED] font-semibold">Cost:</span><span className="text-[#1E1B4B]">{String(result.cost ?? "—")}</span></div>
         <p className="text-[#1E1B4B] italic mt-1">"{String(result.message ?? "")}"</p>
+      </div>
+    );
+  }
+  if (tool === "get_all_segment_benchmarks") {
+    const rows = Array.isArray(result) ? result as Record<string, unknown>[] : [];
+    return (
+      <div className="overflow-x-auto">
+        <table className="text-[11px] w-full border-collapse">
+          <thead><tr className="bg-[#F5F3FF]">
+            {["Segment","Customers","Churn Rate","Avg Prob","High Risk %","Persuadable %"].map((h) => (
+              <th key={h} className="text-left px-2 py-1 text-[#7C3AED] font-bold border-b border-[#EDE9FE]">{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>{rows.map((r) => (
+            <tr key={String(r.segment)} className="border-b border-[#F3F0FF]">
+              <td className="px-2 py-1 font-semibold">{String(r.segment)}</td>
+              <td className="px-2 py-1">{Number(r.customer_count).toLocaleString()}</td>
+              <td className="px-2 py-1">{String(r.churn_rate)}</td>
+              <td className="px-2 py-1">{String(r.avg_churn_prob)}</td>
+              <td className="px-2 py-1">{String(r.high_risk_pct)}</td>
+              <td className="px-2 py-1">{String(r.persuadable_pct)}</td>
+            </tr>
+          ))}</tbody>
+        </table>
       </div>
     );
   }
