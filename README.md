@@ -238,14 +238,28 @@ Artifacts are cached to `data/processed/` and `models/`. Subsequent runs without
 
 ### 3. Set up Supabase tables
 
-In your Supabase SQL editor, run `supabase/config_tables.sql` to create the `retention_playbook` and `business_config` tables.
+With `DATABASE_URL` set in `.env`, one command builds the whole backend:
 
-The `customers`, `retention_actions`, and `intervention_feedback` tables should be created to match the schema in `dashboard/src/lib/supabase.ts`.
+```bash
+python restore_supabase.py
+```
 
-Then run, in order:
+It is idempotent, so it is safe to re-run, and it verifies rather than assumes:
+it counts the rows, calls all ten RPCs, and exits non-zero if any of them fail
+or come back empty.
 
-1. `supabase/rpc_functions.sql` — creates the 10 `SECURITY DEFINER` aggregation functions the dashboard calls.
-2. `supabase/rls_policies.sql` — **enables Row-Level Security** on all five tables and adds the access policies (anon read-only + feedback insert; service-role bypasses RLS for server-side writes). This is required: the dashboard ships the public anon key in the browser, so without RLS that key would grant anyone full read/write/delete on your data.
+Order matters, which is the reason this script exists. The RPCs and the RLS
+policies both reference `customers`, so they have to run *after* the migration
+that creates it. The script runs:
+
+1. `src/database.py::_create_schema` — `conversations`, `messages`, `retention_actions`, `intervention_feedback`.
+2. `supabase/config_tables.sql` — `retention_playbook` and `business_config`.
+3. `migrate_to_supabase.py` — creates `customers` and loads it from `data/processed/uplift.parquet`.
+4. `supabase/rpc_functions.sql` — the 10 `SECURITY DEFINER` aggregation functions the dashboard calls.
+5. `supabase/rls_policies.sql` — **enables Row-Level Security** on all five tables and adds the access policies (anon read-only + feedback insert; service-role bypasses RLS for server-side writes). This is required: the dashboard ships the public anon key in the browser, so without RLS that key would grant anyone full read/write/delete on your data.
+
+To run any step by hand instead, paste the `supabase/*.sql` files into the
+Supabase SQL editor in the order above.
 
 ### 4. Launch the dashboard
 
@@ -303,6 +317,9 @@ GROQ_API_KEY=gsk_...
 # Kaggle (only needed to download raw datasets)
 KAGGLE_USERNAME=your-username
 KAGGLE_KEY=your-api-key
+
+# Shared secret for the daily keepalive cron (see Deployment)
+CRON_SECRET=any-long-random-string
 ```
 
 ---
@@ -402,7 +419,9 @@ Churn-Intelligence-Platform/
 │   │   │   ├── uplift/page.tsx
 │   │   │   ├── retention/page.tsx
 │   │   │   ├── analytics/page.tsx
-│   │   │   └── api/agent/route.ts  # 12-tool ReAct agent (Vercel serverless)
+│   │   │   ├── error.tsx               # Shown when a data load throws (see Deployment)
+│   │   │   ├── api/agent/route.ts      # 12-tool ReAct agent (Vercel serverless)
+│   │   │   └── api/keepalive/route.ts  # Daily cron — stops Supabase pausing the project
 │   │   ├── components/pages/       # Client components (charts, agent UI, audit)
 │   │   └── lib/
 │   │       ├── data.ts             # Typed Supabase RPC wrappers
@@ -410,7 +429,12 @@ Churn-Intelligence-Platform/
 │   └── next.config.ts              # Loads root .env via dotenv
 │
 ├── supabase/
-│   └── config_tables.sql     # DDL + seed data for retention_playbook, business_config
+│   ├── config_tables.sql     # DDL + seed data for retention_playbook, business_config
+│   ├── rpc_functions.sql     # The 10 SECURITY DEFINER functions the dashboard calls
+│   └── rls_policies.sql      # Row-Level Security on all five tables
+│
+├── restore_supabase.py       # Rebuilds the whole backend in dependency order, then verifies
+├── migrate_to_supabase.py    # Creates `customers` and loads it from uplift.parquet
 │
 ├── data/processed/           # Pipeline output parquets (tracked in git — no retraining needed to run dashboard)
 ├── models/                   # Serialized model artifacts (tracked in git)
@@ -476,7 +500,50 @@ The Dockerfile uses `python:3.12-slim`, runs as a non-root user, and includes a 
 
 **The full system is deployed.** The Next.js dashboard is live on Vercel at [customer-segmentation-churn.vercel.app](https://customer-segmentation-churn.vercel.app/retention). The 12-tool AI agent runs as a Vercel serverless function (Next.js API route, 60-second timeout configured in `dashboard/vercel.json`). All data is served from Supabase. No separate backend deployment is needed — the dashboard is self-contained.
 
-Environment variables (Supabase keys, Groq API key) are set directly on the Vercel project — the root `.env` trick that works locally doesn't apply in cloud deployments.
+Environment variables (Supabase keys, Groq API key, `CRON_SECRET`) are set directly on the Vercel project — the root `.env` trick that works locally doesn't apply in cloud deployments.
+
+### Keeping the database awake
+
+Supabase pauses free-tier projects after about a week without traffic, and a
+paused project keeps drifting toward deletion at the 90-day mark. A portfolio
+demo that gets opened once a month never clears that bar on its own.
+
+`dashboard/src/app/api/keepalive/route.ts` runs one cheap `SELECT` against
+`business_config`, and `dashboard/vercel.json` schedules it daily at 06:00 UTC.
+Any API request counts as activity, so the project stays permanently inside its
+7-day window and the deletion timer never starts.
+
+Two deliberate choices:
+
+- **It fails closed.** With `CRON_SECRET` unset the endpoint rejects everything, including Vercel's own scheduled call. Set the variable on the Vercel project (Production) and confirm the first run under **Vercel → Logs** — an unverified keepalive is indistinguishable from no keepalive.
+- **It returns 500 when the database is unreachable**, so a broken keepalive surfaces as a failed cron. An endpoint that returns `200 OK` while the database is gone reports success at exactly the moment it has stopped working.
+
+Cron jobs only run on production deployments, never on previews.
+
+### What happened in August 2026
+
+This section is here because the failure was instructive.
+
+The Supabase project was paused for inactivity. From outside, a paused project
+is indistinguishable from a deleted one: DNS for `<ref>.supabase.co` stops
+resolving entirely (`NXDOMAIN`, not a timeout), and the connection pooler
+answers `FATAL: (ENOTFOUND) tenant/user postgres.<ref> not found`. Both readings
+suggest the data is gone. It was not — resuming the project from the Supabase
+dashboard brought back all 51,047 rows untouched.
+
+The dashboard made this much worse than it needed to be. Every page wrapped its
+queries in `.catch(() => [])`, which collapsed *"the database is unreachable"*
+and *"the query returned no rows"* into the same value. So the site did not fail
+— it rendered a confident zero-state and announced **"~0 customers grouped into
+5 behavioural segments"**, with the `5` hardcoded beside a computed `0`. It
+demoed as an empty product rather than a broken one, which is the worse of the
+two.
+
+Those catches are gone. Queries now throw to `dashboard/src/app/error.tsx`,
+which says the data source is unreachable and shows the error digest — in
+production, Next.js withholds a Server Component's real message from the
+browser, so the digest is the only thread back to the server logs. Both figures
+in the segmentation blurb are now counted from the rows actually returned.
 
 **FastAPI scoring endpoint** (`/health`, `/readiness`, `/score`) is a standalone optional tool for scoring new customers programmatically outside the dashboard. It runs locally or via Docker and is not a dependency for the deployed system.
 
