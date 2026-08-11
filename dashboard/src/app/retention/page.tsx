@@ -4,6 +4,6 @@ import { RetentionClient } from "@/components/pages/retention-client";
 export const dynamic = "force-dynamic";
 
 export default async function RetentionPage() {
-  const persuadables = await getPersuadablesList(100).catch(() => []);
+  const persuadables = await getPersuadablesList(100);
   return <RetentionClient persuadables={persuadables} />;
 }

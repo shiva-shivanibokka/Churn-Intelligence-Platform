@@ -162,7 +162,11 @@ export function SegmentationClient({ summary, umap }: Props) {
       <PageTitle>Customer Segmentation</PageTitle>
 
       <div className="bg-[#EEF2FF] border-l-4 border-[#6366F1] rounded-r-xl px-4 py-3 mb-4 text-[14px] text-[#1E1B4B]">
-        <strong>What this page shows:</strong> ~{summary.reduce((s, r) => s + r.customer_count, 0).toLocaleString()} customers grouped into 5 behavioural segments using K-Means clustering on purchase, engagement, and satisfaction patterns. Each segment has a different churn profile and needs a different retention strategy.
+        {/* Both numbers are counted from the rows actually returned. The segment
+            count used to be hardcoded to 5, so when the query came back empty
+            the sentence read "~0 customers grouped into 5 behavioural segments"
+            — asserting a figure it had never looked at. */}
+        <strong>What this page shows:</strong> {summary.reduce((s, r) => s + r.customer_count, 0).toLocaleString()} customers grouped into {summary.length} behavioural segments using K-Means clustering on purchase, engagement, and satisfaction patterns. Each segment has a different churn profile and needs a different retention strategy.
       </div>
 
       {/* Segment definitions */}
