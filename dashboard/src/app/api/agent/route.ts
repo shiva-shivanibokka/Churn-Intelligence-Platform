@@ -11,8 +11,22 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-key"
 );
 
-// Write client — service role key bypasses RLS for server-side inserts.
-// Falls back to anon key if service role key is not configured.
+// Write client — the service role key bypasses RLS for server-side inserts.
+//
+// It still falls back to the anon key so that a missing variable degrades to a
+// read-only agent rather than a dead route, but the fallback is no longer
+// silent. Every generated plan was being refused by RLS with "new row violates
+// row-level security policy", logged server-side, and then reported to the
+// browser as a perfectly good 200 — so the dashboard showed a plan, the user
+// assumed it was recorded, and Audit & Analytics stopped gaining rows for six
+// weeks without a single visible symptom.
+const HAS_SERVICE_ROLE = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+if (!HAS_SERVICE_ROLE) {
+  console.warn(
+    "SUPABASE_SERVICE_ROLE_KEY is not set — retention plans will generate but " +
+      "cannot be saved, because RLS blocks inserts made with the anon key."
+  );
+}
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co",
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-key"
@@ -644,6 +658,7 @@ export async function POST(req: NextRequest) {
 
         // Save to retention_actions server-side (uses service role key to bypass RLS)
         let savedId: string | null = null;
+        let saveError: string | null = null;
         if (!action.do_not_intervene_reason && customer) {
           const { data: saved, error: saveErr } = await supabaseAdmin
             .from("retention_actions")
@@ -664,11 +679,20 @@ export async function POST(req: NextRequest) {
             })
             .select("id")
             .single();
-          if (saveErr) console.error("retention_actions insert failed:", saveErr.message);
-          else savedId = (saved as { id: string } | null)?.id ?? null;
+          if (saveErr) {
+            console.error("retention_actions insert failed:", saveErr.message);
+            // Travels back to the browser so the UI can say the plan was not
+            // recorded. Logging alone is what let this run unnoticed.
+            saveError = HAS_SERVICE_ROLE
+              ? saveErr.message
+              : "SUPABASE_SERVICE_ROLE_KEY is not set on this deployment, so the " +
+                "plan could not be written to retention_actions.";
+          } else {
+            savedId = (saved as { id: string } | null)?.id ?? null;
+          }
         }
 
-        return NextResponse.json({ action, saved_id: savedId });
+        return NextResponse.json({ action, saved_id: savedId, save_error: saveError });
       } catch {
         return NextResponse.json({ action: { error: "Could not parse agent response", raw: raw.slice(0, 400), trace } });
       }

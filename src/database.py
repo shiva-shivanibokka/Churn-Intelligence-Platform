@@ -122,10 +122,21 @@ def _create_schema(conn):
                 channel           TEXT,
                 timing            TEXT,
                 message_framing   TEXT,
+                confidence        TEXT,
                 agent_reasoning   JSONB,
                 agentic_mode      BOOLEAN DEFAULT FALSE,
                 generated_at      TIMESTAMPTZ DEFAULT NOW()
             );
+
+            -- `confidence` was added to both agent insert paths without a
+            -- matching migration, so every save failed with "Could not find the
+            -- 'confidence' column" while the API still returned 200 and a plan.
+            -- Audit & Analytics quietly stopped gaining rows.
+            --
+            -- CREATE TABLE IF NOT EXISTS above is a no-op on a table that
+            -- already exists, so it cannot repair a live database on its own.
+            -- This ALTER is what actually fixes one, and it is idempotent.
+            ALTER TABLE retention_actions ADD COLUMN IF NOT EXISTS confidence TEXT;
 
             CREATE TABLE IF NOT EXISTS intervention_feedback (
                 id                   TEXT PRIMARY KEY,

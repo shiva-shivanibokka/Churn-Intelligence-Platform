@@ -502,6 +502,12 @@ The Dockerfile uses `python:3.12-slim`, runs as a non-root user, and includes a 
 
 Environment variables (Supabase keys, Groq API key, `CRON_SECRET`) are set directly on the Vercel project — the root `.env` trick that works locally doesn't apply in cloud deployments.
 
+**`SUPABASE_SERVICE_ROLE_KEY` is required, not optional.** RLS blocks inserts made
+with the anon key, so without it the agent still generates plans but every write
+to `retention_actions` is refused and Audit & Analytics silently stops gaining
+rows. The route now reports that back to the browser instead of logging it and
+returning 200, but the variable still has to be set.
+
 ### Keeping the database awake
 
 Supabase pauses free-tier projects after about a week without traffic, and a

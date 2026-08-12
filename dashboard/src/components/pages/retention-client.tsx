@@ -24,6 +24,9 @@ type Action = {
   do_not_intervene_reason?: string;
   error?: string;
   trace?: TraceStep[];
+  // Set when the plan was generated but could not be written to
+  // retention_actions. The plan on screen is real; the audit trail is not.
+  save_error?: string;
 };
 
 type TraceStep = {
@@ -357,6 +360,7 @@ export function RetentionClient({ persuadables }: Props) {
       });
       const data = await res.json();
       const plan = data.action ?? { error: data.error };
+      if (data.save_error) plan.save_error = data.save_error;
       setAction(plan);
     } catch (e) {
       setAction({ customer_id: selectedId, segment: "", churn_probability: 0, uplift_score: 0, net_roi: 0, error: String(e) });
@@ -460,6 +464,14 @@ export function RetentionClient({ persuadables }: Props) {
           {action && !action.error && !action.do_not_intervene_reason && (
             <div>
               <SectionHeading>AI-Generated Retention Plan</SectionHeading>
+              {action.save_error && (
+                <div className="mb-4 rounded-xl border-2 border-[#FCD34D] bg-[#FFFBEB] px-4 py-3 text-[13px] text-[#92400E]">
+                  <b>This plan was not recorded.</b> It is shown below and is
+                  real, but the write to <code>retention_actions</code> failed,
+                  so it will not appear in Audit &amp; Analytics.{" "}
+                  {action.save_error}
+                </div>
+              )}
               {action.trace && action.trace.length > 0 && (
                 <div className="mb-4">
                   <AgentTrace trace={action.trace} defaultOpen />
