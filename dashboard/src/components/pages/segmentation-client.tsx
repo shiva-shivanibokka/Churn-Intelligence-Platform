@@ -211,8 +211,15 @@ export function SegmentationClient({ summary, umap }: Props) {
         <span className="text-[13px] text-[#7C3AED] font-medium">{currentCaption.label}</span>
       </div>
       <div className="bg-[#F5F3FF] border border-[#DDD6FE] rounded-xl px-4 py-2.5 mb-3 text-[13px] text-[#4338CA]">
-        {currentCaption.caption}
+        {currentCaption.caption}{" "}
+        <span className="text-[#6D28D9]">
+          <b>Scroll</b> to zoom, <b>drag</b> a box to zoom to a region,{" "}
+          <b>double-click</b> to reset.
+        </span>
       </div>
+      {/* scrollZoom defaults to "gl3d+geo+map", so the wheel does nothing on a 2D
+          scatter. Box-drag and the toolbar buttons zoomed fine, but the wheel —
+          what people reach for first — just scrolled the page past the chart. */}
       <ChartCard>
         <Plot
           data={umapTraces as Plotly.Data[]}
@@ -225,7 +232,7 @@ export function SegmentationClient({ summary, umap }: Props) {
             plot_bgcolor: "#FAFAFA",
             font: { family: "Inter, sans-serif", color: "#334155" },
           }}
-          config={{ responsive: true, displayModeBar: true }}
+          config={{ responsive: true, displayModeBar: true, scrollZoom: true }}
           style={{ width: "100%" }}
           useResizeHandler
         />

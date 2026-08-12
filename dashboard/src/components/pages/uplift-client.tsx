@@ -122,7 +122,7 @@ export function UpliftClient({ kpis, typeSummary, roiBySeg, topPersuadables, sca
             plot_bgcolor: "#FAFAFA",
             font: { family: "Inter, sans-serif", color: "#334155" },
           }}
-          config={{ responsive: true, displayModeBar: true }}
+          config={{ responsive: true, displayModeBar: true, scrollZoom: true }}
           style={{ width: "100%" }}
           useResizeHandler
         />
