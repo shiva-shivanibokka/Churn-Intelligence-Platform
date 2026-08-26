@@ -11,11 +11,12 @@ as primary signals, mirroring industry best practice for fairness and signal qua
 """
 
 import logging
-import pandas as pd
-import numpy as np
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-import joblib
 import os
+
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder
+
+from composite_features import add_composite_features, fit_composite_norms
 
 logger = logging.getLogger(__name__)
 
@@ -124,74 +125,21 @@ def encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
+def engineer_features(df: pd.DataFrame, norms: dict | None = None) -> pd.DataFrame:
     """
-    Build composite behavioral features.
+    Build the eight composite behavioural features.
 
-    These mirror leading indicators documented in Uber/Spotify/Salesforce production systems:
-    - Engagement depth (not just frequency, but HOW deeply customers use the product)
-    - Recency decay (how recently did they last take a meaningful action)
-    - Stickiness (cross-device usage signals commitment)
-    - Support risk (complaint history is a leading churn indicator at Salesforce)
-    - Spend trajectory (order value trend — declining spend predicts churn)
-    - Discount sensitivity (heavy coupon use signals price-sensitivity, not loyalty)
+    Delegates to src/composite_features.py so that all three dataset modules
+    share one implementation. Pass `norms` (from `fit_composite_norms` on the
+    training frame, persisted to models/feature_norms.json) whenever scoring
+    rows that are not the training population — without it the normalisers are
+    refitted on whatever was handed in, which silently pins five of the eight
+    features to 1.0 for a single-row request.
     """
+    if norms is None:
+        norms = fit_composite_norms(df)
+    return add_composite_features(df, norms)
 
-    # --- Engagement Score ---
-    # Weighted composite: hours on app (depth) + order count (frequency)
-    # Normalized to [0,1] range for interpretability
-    df["EngagementScore"] = 0.5 * (
-        df["HourSpendOnApp"] / df["HourSpendOnApp"].max()
-    ) + 0.5 * (df["OrderCount"] / df["OrderCount"].max())
-
-    # --- Recency Signal ---
-    # Days since last order normalized. Higher = more lapsed.
-    # Direct analog of Spotify's "days since last stream" leading indicator.
-    _max_days = df["DaySinceLastOrder"].max()
-    df["RecencySignal"] = df["DaySinceLastOrder"] / (_max_days if _max_days > 0 else 1)
-
-    # --- Stickiness Index ---
-    # Number of registered devices / number of addresses.
-    # Multiple devices = deep ecosystem integration (hard to leave).
-    # Multiple addresses = loyalty across life events (positive signal).
-    df["StickinessIndex"] = (df["NumberOfDeviceRegistered"] + df["NumberOfAddress"]) / (
-        df["NumberOfDeviceRegistered"].max() + df["NumberOfAddress"].max()
-    )
-
-    # --- Spend Trend ---
-    # Year-over-year order amount change. Negative trend is a strong churn signal.
-    # Normalized. At Salesforce, spend decline is a top-3 churn predictor.
-    df["SpendTrend"] = df["OrderAmountHikeFromlastYear"] / (
-        df["OrderAmountHikeFromlastYear"].max() + 1e-9
-    )
-
-    # --- Support Risk Score ---
-    # Complain flag + satisfaction score inversion.
-    # SatisfactionScore: 1=best, 5=worst. Invert so higher = more at risk.
-    # This mirrors Salesforce's "support sentiment" health score component.
-    df["SupportRiskScore"] = (
-        df["Complain"] * 0.6
-        + ((df["SatisfactionScore"] - 1) / 4) * 0.4  # normalized 0-1, higher = worse
-    )
-
-    # --- Discount Sensitivity ---
-    # Heavy coupon usage relative to order count signals price-driven loyalty,
-    # not brand loyalty — a leading churn indicator when discounts stop.
-    df["DiscountSensitivity"] = df["CouponUsed"] / (df["OrderCount"] + 1e-9)
-
-    # --- Tenure Stability ---
-    # Long-tenured customers are inherently more stable.
-    # Log-transform dampens the effect of extreme tenure values.
-    df["TenureStability"] = np.log1p(df["Tenure"])
-
-    # --- Warehouse Friction ---
-    # Longer warehouse-to-home distance = more friction in the fulfillment experience.
-    # Normalized to [0, 1].
-    df["WarehouseFriction"] = df["WarehouseToHome"] / (
-        df["WarehouseToHome"].max() + 1e-9
-    )
-
-    return df
 
 
 def get_feature_sets() -> dict:

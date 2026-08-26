@@ -19,9 +19,11 @@ Key design decisions:
 
 import logging
 import os
+
 import pandas as pd
-import numpy as np
 from sklearn.preprocessing import LabelEncoder
+
+from composite_features import add_composite_features, fit_composite_norms
 
 logger = logging.getLogger(__name__)
 
@@ -167,9 +169,11 @@ def engineer_customer_features(orders: pd.DataFrame) -> pd.DataFrame:
     agg["Tenure"] = (CHURN_CUTOFF_DATE - agg["first_order_date"]).dt.days.clip(lower=1)
     agg["DaySinceLastOrder"] = (CHURN_CUTOFF_DATE - agg["last_order_date"]).dt.days.clip(lower=0)
 
-    # YoY spend change: compare spend in 2nd half of history vs 1st half
-    mid_date = agg["first_order_date"] + (CHURN_CUTOFF_DATE - agg["first_order_date"]) / 2
-    # Simplified: approximate as positive if avg order value is above median
+    # YoY spend change. The intent was to compare spend in the second half of
+    # each customer's history against the first, but Olist's order table is
+    # aggregated per customer before this point, so the per-period split is no
+    # longer available — this is the median-based approximation that replaced it.
+    # (A `mid_date` for the abandoned approach was still being computed here.)
     global_median_spend = agg["AvgOrderValue"].median()
     agg["OrderAmountHikeFromlastYear"] = (agg["AvgOrderValue"] - global_median_spend).clip(lower=0)
 
@@ -213,38 +217,20 @@ def engineer_customer_features(orders: pd.DataFrame) -> pd.DataFrame:
     return agg
 
 
-def engineer_behavioral_features(df: pd.DataFrame) -> pd.DataFrame:
+def engineer_behavioral_features(df: pd.DataFrame, norms: dict | None = None) -> pd.DataFrame:
     """
     Build composite behavioral features using the same formulas as features.py.
     This keeps the segmentation and churn pipeline identical.
     """
     df = df.copy()
 
-    df["EngagementScore"] = 0.5 * (
-        df["HourSpendOnApp"] / df["HourSpendOnApp"].max()
-    ) + 0.5 * (df["OrderCount"] / df["OrderCount"].max())
-
-    _max_days = df["DaySinceLastOrder"].max()
-    df["RecencySignal"] = df["DaySinceLastOrder"] / (_max_days if _max_days > 0 else 1)
-
-    df["StickinessIndex"] = (df["NumberOfDeviceRegistered"] + df["NumberOfAddress"]) / (
-        df["NumberOfDeviceRegistered"].max() + df["NumberOfAddress"].max()
-    )
-
-    df["SpendTrend"] = df["OrderAmountHikeFromlastYear"] / (
-        df["OrderAmountHikeFromlastYear"].max() + 1e-9
-    )
-
-    df["SupportRiskScore"] = (
-        df["Complain"] * 0.6
-        + ((df["SatisfactionScore"] - 1) / 4) * 0.4
-    )
-
-    df["DiscountSensitivity"] = df["CouponUsed"] / (df["OrderCount"] + 1e-9)
-
-    df["TenureStability"] = np.log1p(df["Tenure"])
-
-    df["WarehouseFriction"] = df["WarehouseToHome"] / (df["WarehouseToHome"].max() + 1e-9)
+    # ── Behavioral composites ────────────────────────────────────────────────
+    # Shared with the other dataset modules, and normalised by constants fitted
+    # on the training population rather than recomputed per call — see
+    # src/composite_features.py for why that distinction matters at serving time.
+    if norms is None:
+        norms = fit_composite_norms(df)
+    df = add_composite_features(df, norms)
 
     return df
 
@@ -342,7 +328,6 @@ def build_olist_pipeline(save: bool = True) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    import sys
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     df = build_olist_pipeline(save=True)
     print("\nChurn distribution:")

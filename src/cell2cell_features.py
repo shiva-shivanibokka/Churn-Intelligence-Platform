@@ -19,9 +19,11 @@ Leaky columns excluded (they were recorded AFTER churn was known):
 
 import logging
 import os
+
 import pandas as pd
-import numpy as np
 from sklearn.preprocessing import LabelEncoder
+
+from composite_features import add_composite_features, fit_composite_norms
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +147,7 @@ def clean_cell2cell(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
+def engineer_features(df: pd.DataFrame, norms: dict | None = None) -> pd.DataFrame:
     """
     Map Cell2Cell columns to pipeline-compatible feature names and
     engineer the same behavioral composites used in the E-Commerce and Olist pipelines.
@@ -213,33 +215,13 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     df["Gender"] = 0  # not in Cell2Cell
     df["PreferredLoginDevice"] = df.get("HandsetWebCapable", pd.Series(0, index=df.index)).fillna(0).astype(int)
 
-    # ── Behavioral composites (same formulas as features.py) ─────────────────
-    df["EngagementScore"] = (
-        0.5 * (df["HourSpendOnApp"] / max(df["HourSpendOnApp"].max(), 1))
-        + 0.5 * (df["OrderCount"] / max(df["OrderCount"].max(), 1))
-    )
-
-    _max_days = df["DaySinceLastOrder"].max()
-    df["RecencySignal"] = df["DaySinceLastOrder"] / (_max_days if _max_days > 0 else 1)
-
-    df["StickinessIndex"] = (df["NumberOfDeviceRegistered"] + df["NumberOfAddress"]) / (
-        df["NumberOfDeviceRegistered"].max() + df["NumberOfAddress"].max()
-    )
-
-    df["SpendTrend"] = df["OrderAmountHikeFromlastYear"] / (
-        df["OrderAmountHikeFromlastYear"].max() + 1e-9
-    )
-
-    df["SupportRiskScore"] = (
-        df["Complain"] * 0.6
-        + ((df["SatisfactionScore"] - 1) / 4) * 0.4
-    )
-
-    df["DiscountSensitivity"] = df["CouponUsed"] / (df["OrderCount"] + 1e-9)
-
-    df["TenureStability"] = np.log1p(df["Tenure"])
-
-    df["WarehouseFriction"] = df["WarehouseToHome"] / (df["WarehouseToHome"].max() + 1e-9)
+    # ── Behavioral composites ────────────────────────────────────────────────
+    # Shared with the other dataset modules, and normalised by constants fitted
+    # on the training population rather than recomputed per call — see
+    # src/composite_features.py for why that distinction matters at serving time.
+    if norms is None:
+        norms = fit_composite_norms(df)
+    df = add_composite_features(df, norms)
 
     return df
 
