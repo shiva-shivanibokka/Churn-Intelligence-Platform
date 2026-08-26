@@ -8,27 +8,59 @@ Run this once to build all models. The Streamlit app reads from cached
 .parquet and .pkl files — no retraining on app load.
 """
 
+import json
 import logging
 import os
 import sys
+
 import joblib
+import numpy as np
 import pandas as pd
 
 # Add src directory to path for imports
 sys.path.insert(0, os.path.dirname(__file__))
 
-from logging_config import configure_logging
-from features import build_pipeline, get_feature_sets
-from olist_features import build_olist_pipeline, get_olist_feature_sets
 from cell2cell_features import build_cell2cell_pipeline, get_cell2cell_feature_sets
-from segmentation import run_segmentation
 from churn_model import run_churn_pipeline
+from composite_features import (
+    COMPOSITE_FEATURES,
+    add_composite_features,
+    fit_composite_norms,
+)
+from features import build_pipeline, get_feature_sets
+from logging_config import configure_logging
+from olist_features import build_olist_pipeline, get_olist_feature_sets
+from segmentation import run_segmentation
 from uplift_model import run_uplift_pipeline
 
 logger = logging.getLogger(__name__)
 
 PROCESSED_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "processed")
 MODELS_PATH = os.path.join(os.path.dirname(__file__), "..", "models")
+
+# Which builder and which feature sets belong to each --dataset choice.
+DATASETS = {
+    "ecommerce": (build_pipeline, get_feature_sets),
+    "olist": (build_olist_pipeline, get_olist_feature_sets),
+    "cell2cell": (build_cell2cell_pipeline, get_cell2cell_feature_sets),
+}
+
+# Every dataset writes to the same artifact paths, so the only way to know which
+# one produced the files on disk is to record it next to them.
+META_PATH = os.path.join(MODELS_PATH, "pipeline_meta.json")
+
+# Constants the composite features are normalised by, needed by anything that
+# scores rows outside the training run (api/serve.py).
+NORMS_PATH = os.path.join(MODELS_PATH, "feature_norms.json")
+
+
+def _cached_dataset() -> str | None:
+    """The dataset the artifacts on disk were built from, if it was recorded."""
+    try:
+        with open(META_PATH, encoding="utf-8") as fh:
+            return json.load(fh).get("dataset")
+    except (OSError, ValueError):
+        return None
 
 
 def run_full_pipeline(force_retrain: bool = False, dataset: str = "ecommerce") -> dict:
@@ -48,13 +80,33 @@ def run_full_pipeline(force_retrain: bool = False, dataset: str = "ecommerce") -
 
     segmented_path = os.path.join(PROCESSED_PATH, "segmented.parquet")
 
-    if not force_retrain and os.path.exists(uplift_path):
+    if dataset not in DATASETS:
+        raise ValueError(f"Unknown dataset {dataset!r}. Choose one of {sorted(DATASETS)}.")
+    build_fn, feature_set_fn = DATASETS[dataset]
+
+    # The cache is only a cache for the dataset that filled it.
+    #
+    # This used to load uplift.parquet whenever the file existed, whatever
+    # --dataset asked for, and then return the *e-commerce* feature sets
+    # regardless. So `--dataset olist` on a machine holding cell2cell artifacts
+    # printed a full, plausible summary of cell2cell — the flag the README
+    # documents for switching datasets silently did nothing.
+    cached_dataset = _cached_dataset()
+    cache_usable = os.path.exists(uplift_path) and cached_dataset == dataset
+    if os.path.exists(uplift_path) and cached_dataset != dataset:
+        logger.info(
+            "Cached artifacts were built from dataset=%s but dataset=%s was "
+            "requested — rebuilding rather than returning the wrong data.",
+            cached_dataset or "unrecorded", dataset,
+        )
+
+    if not force_retrain and cache_usable:
         logger.info("Loading cached artifacts...")
         df = pd.read_parquet(uplift_path)
         seg_profiles = joblib.load(seg_profiles_path)
         segment_models = joblib.load(seg_models_path)
         stability = joblib.load(stability_path)
-        feature_sets = get_feature_sets()
+        feature_sets = feature_set_fn()
         logger.info("Loaded from cache.")
         return {
             "df": df,
@@ -70,19 +122,40 @@ def run_full_pipeline(force_retrain: bool = False, dataset: str = "ecommerce") -
 
     # Stage 1: Feature Engineering
     logger.info("[Stage 1] Feature Engineering")
-    if dataset == "olist":
-        feature_sets = get_olist_feature_sets()
-        df = build_olist_pipeline(save=True)
-    elif dataset == "cell2cell":
-        feature_sets = get_cell2cell_feature_sets()
-        df = build_cell2cell_pipeline(save=True)
-    else:
-        feature_sets = get_feature_sets()
-        df = build_pipeline(save=True)
+    feature_sets = feature_set_fn()
+    df = build_fn(save=True)
+
+    # ── Persist the composite normalisers ────────────────────────────────────
+    #
+    # Five of the eight composites divide by a column maximum. During training
+    # that maximum is a property of the training population; at inference it has
+    # to be the *same* constant, or scoring one customer divides them by
+    # themselves. Saving them here is what makes api/serve.py able to reproduce
+    # training-time features.
+    #
+    # The constants are re-derived from the built frame rather than threaded out
+    # of the builder, so the assumption that doing so reproduces what the builder
+    # used is checked rather than trusted.
+    norms = fit_composite_norms(df)
+    _replay = add_composite_features(df.copy(), norms)
+    for feat in COMPOSITE_FEATURES:
+        if feat in df.columns and not np.allclose(
+            _replay[feat], df[feat], rtol=1e-9, atol=1e-12, equal_nan=True
+        ):
+            raise RuntimeError(
+                f"Refitting composite norms on the built frame did not reproduce "
+                f"'{feat}'. The dataset builder must be transforming a column after "
+                f"the composites are computed, so the saved norms would not match "
+                f"what the models were trained on."
+            )
+    with open(NORMS_PATH, "w", encoding="utf-8") as fh:
+        json.dump(norms, fh, indent=2)
+    logger.info("Saved composite feature norms to %s", NORMS_PATH)
 
     # Stage 2: Segmentation — skip if cached segmented.parquet exists
     if (
         not force_retrain
+        and cached_dataset == dataset
         and os.path.exists(segmented_path)
         and os.path.exists(stability_path)
     ):
@@ -127,6 +200,8 @@ def run_full_pipeline(force_retrain: bool = False, dataset: str = "ecommerce") -
 
     # Save final enriched dataset
     df.to_parquet(uplift_path, index=False)
+    with open(META_PATH, "w", encoding="utf-8") as fh:
+        json.dump({"dataset": dataset, "n_rows": int(len(df))}, fh, indent=2)
     logger.info("Pipeline complete. Final dataset: %s", df.shape)
     logger.info("Columns: %s", df.columns.tolist())
 

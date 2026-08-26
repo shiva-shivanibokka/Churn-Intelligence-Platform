@@ -5,7 +5,7 @@ Implements production-grade segmentation with:
 - K-Means++ for business-interpretable hard cluster assignments
 - Gaussian Mixture Models (GMM) for soft probability assignments
   (each customer gets a probability distribution across segments — not a hard label)
-- UMAP for 2D visualization of high-dimensional behavioral space
+- PaCMAP for 2D visualization of high-dimensional behavioral space
 - Bootstrap cluster stability analysis via Adjusted Rand Index (ARI)
   across 100 resamplings — a production validation step that most
   portfolio implementations skip entirely
@@ -16,20 +16,21 @@ so non-technical stakeholders can act on them.
 """
 
 import logging
-import numpy as np
-import pandas as pd
-from sklearn.cluster import KMeans
-from sklearn.mixture import GaussianMixture
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import (
-    silhouette_score,
-    davies_bouldin_score,
-    adjusted_rand_score,
-)
-import pacmap
-import joblib
 import os
 import warnings
+
+import joblib
+import numpy as np
+import pacmap
+import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.metrics import (
+    adjusted_rand_score,
+    davies_bouldin_score,
+    silhouette_score,
+)
+from sklearn.mixture import GaussianMixture
+from sklearn.preprocessing import StandardScaler
 
 warnings.filterwarnings("ignore")
 
@@ -133,6 +134,7 @@ def bootstrap_stability(
     n_clusters: int = 5,
     n_bootstrap: int = 100,
     sample_frac: float = 0.8,
+    seed: int = 42,
 ) -> dict:
     """
     Bootstrap Cluster Stability Analysis via Adjusted Rand Index (ARI).
@@ -156,6 +158,15 @@ def bootstrap_stability(
     """
     n_samples = len(X_scaled)
 
+    # Seeded generator, not the global RNG.
+    #
+    # np.random.choice draws from global state, so this function returned a
+    # different mean ARI on every run while the README quoted one to three
+    # decimals and called it reproducible. Every KMeans here is already seeded;
+    # the resampling was the one unseeded step, so it was the only reason the
+    # headline number moved.
+    rng = np.random.default_rng(seed)
+
     # Reference model on full dataset
     ref_km = KMeans(n_clusters=n_clusters, init="k-means++", n_init=10, random_state=42)
     ref_labels = ref_km.fit_predict(X_scaled)
@@ -163,7 +174,7 @@ def bootstrap_stability(
     ari_scores = []
     for i in range(n_bootstrap):
         # Sample indices with replacement
-        sample_idx = np.random.choice(
+        sample_idx = rng.choice(
             n_samples, size=int(n_samples * sample_frac), replace=True
         )
         X_sample = X_scaled[sample_idx]
@@ -200,12 +211,23 @@ def bootstrap_stability(
     }
 
 
-def fit_umap(
-    X_scaled: np.ndarray, n_neighbors: int = 10, min_dist: float = 0.1
-) -> np.ndarray:
+def fit_pacmap(X_scaled: np.ndarray, n_neighbors: int = 10) -> np.ndarray:
     """
     PaCMAP dimensionality reduction to 2D for interactive cluster visualization.
-    Replaces UMAP — same purpose, no numba/TensorFlow dependency, works with any NumPy version.
+
+    Chosen over UMAP for the same purpose: no numba/TensorFlow dependency, and
+    it works against any NumPy version.
+
+    This used to be called `fit_umap` and took a `min_dist` argument, which is a
+    UMAP parameter that PaCMAP has no equivalent for — it was accepted and
+    silently dropped. The name outlived the swap and spread: the dashboard still
+    announced a "UMAP 2D Projection" and the glossary defined Uniform Manifold
+    Approximation and Projection to visitors looking at a PaCMAP embedding.
+
+    The emitted columns stay `UMAP_1` / `UMAP_2`, and so do `umap_1` / `umap_2`
+    in Postgres. Those are internal identifiers nobody reading the dashboard
+    sees, and renaming them means altering a live table for no gain — but they
+    are PaCMAP coordinates, and this is the note saying so.
     """
     reducer = pacmap.PaCMAP(
         n_components=2,
@@ -301,7 +323,6 @@ def run_segmentation(df: pd.DataFrame, feature_cols: list, n_clusters: int = 5) 
     Full segmentation pipeline. Returns all artifacts needed for the Streamlit UI.
     """
     logger.info("Scaling %d features for %d customers...", len(feature_cols), len(df))
-    X = df[feature_cols].values
     X_scaled, scaler = scale_features(df[feature_cols])
 
     logger.info("Finding optimal k...")
@@ -317,8 +338,8 @@ def run_segmentation(df: pd.DataFrame, feature_cols: list, n_clusters: int = 5) 
     stability = bootstrap_stability(X_scaled, n_clusters=n_clusters, n_bootstrap=100)
     logger.info("Stability: mean ARI=%.3f (%s)", stability["mean_ari"], stability["grade"])
 
-    logger.info("Fitting UMAP for visualization...")
-    umap_embedding = fit_umap(X_scaled)
+    logger.info("Fitting PaCMAP for visualization...")
+    umap_embedding = fit_pacmap(X_scaled)
 
     logger.info("Labeling segments...")
     df_out, label_map = label_segments(km_labels, df, feature_cols)
@@ -327,7 +348,7 @@ def run_segmentation(df: pd.DataFrame, feature_cols: list, n_clusters: int = 5) 
     for i in range(n_clusters):
         df_out[f"GMM_Prob_Seg{i}"] = gmm_probs[:, i]
 
-    # Add UMAP coordinates
+    # Add the 2D embedding (PaCMAP — see fit_pacmap on the column names)
     df_out["UMAP_1"] = umap_embedding[:, 0]
     df_out["UMAP_2"] = umap_embedding[:, 1]
 
@@ -339,6 +360,11 @@ def run_segmentation(df: pd.DataFrame, feature_cols: list, n_clusters: int = 5) 
     joblib.dump(km, os.path.join(MODELS_PATH, "kmeans.pkl"))
     joblib.dump(gmm, os.path.join(MODELS_PATH, "gmm.pkl"))
     joblib.dump(scaler, os.path.join(MODELS_PATH, "scaler.pkl"))
+    # Without this the mapping from a KMeans cluster index to a business segment
+    # name lived only inside this function's return value, so api/serve.py — which
+    # loads kmeans.pkl and has to name the cluster it predicts — had nothing to
+    # look the name up in, and fell back to whichever segment happened to be first.
+    joblib.dump(label_map, os.path.join(MODELS_PATH, "label_map.pkl"))
 
     out_path = os.path.join(PROCESSED_PATH, "segmented.parquet")
     df_out.to_parquet(out_path, index=False)
