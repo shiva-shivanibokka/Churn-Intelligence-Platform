@@ -137,22 +137,42 @@ agent is the one feature that costs money to run, and it is offered two ways.
 | | What you get | What it costs you |
 |---|---|---|
 | **Watch a Recorded Run** | Six real agent runs — three retention plans and three questions — captured against the live database and committed as static JSON. Full reasoning traces, real tool calls, real numbers. | Nothing. No key, no signup. |
-| **Generate Action Plan** / **Ask AI Assistant** | The live 12-tool ReAct agent, answering about any customer you pick. | A [free Groq key](https://console.groq.com/keys), pasted into the page. |
+| **Generate Action Plan** / **Ask AI Assistant** | The live 12-tool ReAct agent, on any customer you pick. | An API key from any of six providers. |
+
+**Six providers, one code path.** Groq, OpenAI, Anthropic, Google Gemini,
+OpenRouter and Cerebras all speak the OpenAI chat-completions dialect including
+tool calling, so the agent has a single implementation and the provider is a
+base URL plus a credential. Pick a provider in the UI, paste a key, and the
+model dropdown fills in.
+
+**The model list is fetched, not hardcoded.** `POST /api/agent/models` asks your
+provider what it serves, using your key. That is not a convenience — it is the
+fix for a bug this project shipped. The agent was pinned to
+`llama-3.3-70b-versatile` until Groq retired it, after which every request
+returned `404 model_not_found` and surfaced as a generic 500, for weeks. No test
+or type check can catch that: the model name was a valid string in correct code
+that stopped existing. The provider is the only authority on what it serves, so
+the dropdown asks it.
 
 **Why there is no shared key.** A public agent endpoint backed by the owner's
-Groq free tier is a 100,000-token-a-day budget shared by every visitor, and the
-first person with a `for` loop turns the feature off for everyone else — in a
-way that reads as "this project is broken" rather than "someone used it up".
-So this deployment holds no Groq credential at all. That also means there is no
-secret here to leak or rotate, and nothing a stranger can spend.
+free tier is one daily token budget shared by every visitor, and the first
+person with a `for` loop turns the feature off for everyone else — in a way
+that reads as "this project is broken" rather than "someone used it up". So
+this deployment holds no LLM credential at all. There is nothing here to leak,
+rotate, or pay for.
 
-**What happens to your key.** It is held in `sessionStorage` for the tab you
-are in, sent as a request header to this site's own agent route, and forwarded
-to Groq. It is never stored server-side, never written to the database, never
-logged, and never put in a URL — where it would end up in access logs and
-browser history. Close the tab and it is gone. The base URL is not
-configurable, deliberately: accepting a caller-supplied endpoint alongside a
-caller-supplied key would make the route an open proxy.
+**What happens to your key.** It is held in `sessionStorage` for the tab you are
+in, sent as a request header to this site's own agent route, and forwarded to
+the provider you chose. It is never stored server-side, never written to the
+database, never logged, and never put in a URL — where it would end up in access
+logs and browser history. Close the tab and it is gone.
+
+The base URL is deliberately **not** configurable. The client sends a provider
+*id*; the server resolves the URL from a fixed map. Accepting a caller-supplied
+endpoint alongside a caller-supplied key would make the route an open proxy —
+anything with a `fetch` could aim it at an internal address and read the
+response back through us. Errors are scrubbed of anything key-shaped on the way
+out, because provider SDKs sometimes echo request context into messages.
 
 **Why the recordings exist.** Bring-your-own-key is the right trade for anyone
 willing to paste a key, and the wrong one for someone evaluating this in three
@@ -161,6 +181,10 @@ glance. The recorded runs are real calls to the same `/api/agent` route,
 rendered through the same components a live run uses, produced by
 `scripts/record_agent_runs.py` and verified by `--check` (which fails on an
 unredacted key, a truncated answer, or a plan missing its fields).
+
+*Only Groq is verified end to end here, because it is the one provider I hold a
+key for. The other five are wired through the same OpenAI-compatible client and
+the same model-listing endpoint, but I have not run them.*
 
 **AI Agent (12 tools)**
 
@@ -207,7 +231,7 @@ unredacted key, a truncated answer, or a plan missing its fields).
 | next | 16.2.9 | App Router, server components, API routes |
 | react | 19.2.4 | UI |
 | @supabase/supabase-js | ^2.108.2 | Database client — two instances (anon key for reads, service role key for server-side writes) |
-| groq-sdk | ^1.3.0 | AI agent inference |
+| openai | ^7.5.0 | Agent inference across all six providers — they share the OpenAI chat-completions dialect, so one client covers them all |
 | recharts | ^3.9.0 | Bar/line/area charts |
 | react-plotly.js | ^4.0.0 | Scatter plots (PaCMAP, uplift) |
 | tailwindcss | ^4 | Styling |
@@ -578,6 +602,31 @@ with the anon key, so without it the agent still generates plans but every write
 to `retention_actions` is refused and Audit & Analytics silently stops gaining
 rows. The route now reports that back to the browser instead of logging it and
 returning 200, but the variable still has to be set.
+
+### Why the pages are cached, and the scatter is columnar
+
+Two things made the dashboard feel slow in a way that had nothing to do with the
+models.
+
+Every page was `force-dynamic`, so each click on the sidebar paid a full
+Supabase round-trip again for data that only changes when the pipeline is re-run
+and `restore_supabase.py` reloads it — a deliberate manual act, not a live feed.
+Segmentation, Churn and Uplift now revalidate hourly; Retention and Analytics
+stay dynamic because the agent writes rows to them while you watch. The Churn
+page was also a three-wave waterfall of 20 RPCs (one, then four, then fifteen),
+each wave gating the next, measured at **3.7 s** before the first byte. Only the
+segment *names* actually depend on the first query, so the four unfiltered ones
+no longer wait for it.
+
+The segmentation scatter sent 10,000 customers as 10,000 labelled objects, and a
+row spent most of its bytes repeating the key names — `customer_id`,
+`churn_probability`, `uplift_score` and the rest, once per point. That is roughly
+a megabyte of JSON keys in a 2.3 MB page, all of it parsed on the main thread
+before React can hydrate, which is exactly the window where a page is painted but
+does not answer clicks. Sending columns instead says each name once, segment
+labels are factorised into a codebook, coordinates are rounded to the precision a
+pixel can show, and `risk_tier` is derived on the client from the probability it
+was always a function of. **2.29 MB → 475 KB**, same 10,000 points.
 
 ### Keeping the database awake
 

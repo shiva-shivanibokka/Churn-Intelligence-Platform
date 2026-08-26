@@ -60,6 +60,27 @@ export async function getAvgChurnBySegment(): Promise<AvgChurnBySeg[]> {
   return data ?? [];
 }
 
+// ── Payload trimming ──────────────────────────────────────────────────────────
+
+/**
+ * Round a float to `dp` decimals for transport.
+ *
+ * The scatter plots send thousands of rows, and a float64 serialises to its
+ * full precision: `-0.05342163741588593` is twenty characters to express a
+ * number the chart draws at four. Across 10,000 points and several columns that
+ * was the difference between a 2.3 MB page and a manageable one — and every one
+ * of those bytes is paid for twice, once in the server-rendered HTML and again
+ * in the RSC flight payload beside it.
+ *
+ * Four decimals is well past what a scatter pixel or a percentage label can
+ * show. Nothing displayed changes.
+ */
+function trim(value: number | null | undefined, dp = 4): number {
+  if (value == null || Number.isNaN(value)) return 0;
+  const factor = 10 ** dp;
+  return Math.round(value * factor) / factor;
+}
+
 // ── Lightweight scatter data (no full table scan) ────────────────────────────
 export type UpliftScatterPoint = {
   customer_id: string;
@@ -76,27 +97,81 @@ export async function getUpliftScatterData(): Promise<UpliftScatterPoint[]> {
     .select("customer_id, customer_type, churn_probability, uplift_score, net_roi, segment")
     .limit(5000);
   if (error) throw error;
-  return (data ?? []) as UpliftScatterPoint[];
+  return (data ?? []).map((c) => ({
+    customer_id: c.customer_id,
+    customer_type: c.customer_type,
+    segment: c.segment,
+    churn_probability: trim(c.churn_probability),
+    uplift_score: trim(c.uplift_score),
+    net_roi: trim(c.net_roi, 2),
+  })) as UpliftScatterPoint[];
 }
 
-export type UmapPoint = {
-  customer_id: string;
-  umap_1: number;
-  umap_2: number;
-  segment: string;
-  churn_probability: number;
-  churn: number;
-  risk_tier: string;
-  uplift_score: number;
+/**
+ * The behavioural-space scatter, as columns.
+ *
+ * Sent column-wise rather than as an array of row objects, because the row
+ * shape spends most of its bytes saying the same thing ten thousand times.
+ * A single row serialised to about 170 bytes, of which ~95 were the JSON key
+ * names — `customer_id`, `churn_probability`, `uplift_score` and the rest,
+ * repeated once per customer. That is roughly a megabyte of keys in a 2.3 MB
+ * page, and every byte is parsed on the main thread before React can hydrate,
+ * which is why the page rendered long before it would respond to a click.
+ *
+ * Columns say each name once. Segments are additionally factorised into a
+ * codebook, so "Price Sensitive" is stored as a small integer rather than
+ * fourteen characters per point.
+ *
+ * `risk_tier` is gone: it was only ever used to colour points by tier, and the
+ * tier is a fixed function of the churn probability (0.3 / 0.6), so it is
+ * derived on the client instead of shipped.
+ */
+export type UmapColumns = {
+  /** Segment names, indexed by `seg`. */
+  segments: string[];
+  ids: string[];
+  seg: number[];
+  x: number[];
+  y: number[];
+  prob: number[];
+  churn: number[];
+  uplift: number[];
 };
 
-export async function getUmapData(): Promise<UmapPoint[]> {
+export async function getUmapData(): Promise<UmapColumns> {
   const { data, error } = await supabase
     .from("customers")
-    .select("customer_id, umap_1, umap_2, segment, churn_probability, churn, risk_tier, uplift_score")
+    .select("customer_id, umap_1, umap_2, segment, churn_probability, churn, uplift_score")
     .limit(10000);
   if (error) throw error;
-  return (data ?? []) as UmapPoint[];
+
+  const rows = data ?? [];
+  const segments: string[] = [];
+  const segIndex = new Map<string, number>();
+
+  const columns: UmapColumns = {
+    segments,
+    ids: [], seg: [], x: [], y: [], prob: [], churn: [], uplift: [],
+  };
+
+  for (const r of rows) {
+    let idx = segIndex.get(r.segment);
+    if (idx === undefined) {
+      idx = segments.push(r.segment) - 1;
+      segIndex.set(r.segment, idx);
+    }
+    columns.ids.push(r.customer_id);
+    columns.seg.push(idx);
+    // Two decimals on the coordinates: the plot is ~700px across a range of
+    // about 30 units, so anything finer lands on the same pixel.
+    columns.x.push(trim(r.umap_1, 2));
+    columns.y.push(trim(r.umap_2, 2));
+    columns.prob.push(trim(r.churn_probability));
+    columns.churn.push(r.churn);
+    columns.uplift.push(trim(r.uplift_score));
+  }
+
+  return columns;
 }
 
 // ── Uplift page RPCs ──────────────────────────────────────────────────────────
@@ -132,7 +207,12 @@ export type TopPersuadable = {
 export async function getTopPersuadables(limit = 200): Promise<TopPersuadable[]> {
   const { data, error } = await supabase.rpc("get_top_persuadables", { p_limit: limit });
   if (error) throw error;
-  return data ?? [];
+  return ((data ?? []) as TopPersuadable[]).map((c) => ({
+    ...c,
+    churn_probability: trim(c.churn_probability),
+    uplift_score: trim(c.uplift_score),
+    net_roi: trim(c.net_roi, 2),
+  }));
 }
 
 export type UpliftKpis = {

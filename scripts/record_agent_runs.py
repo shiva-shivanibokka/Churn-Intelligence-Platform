@@ -63,8 +63,11 @@ OUT_DIR = ROOT / "dashboard" / "public" / "agent-runs"
 
 # The route's own configuration, restated here so a recording is made with the
 # same model and round limit the live agent uses.
-# Kept in step with dashboard/src/lib/models.ts. Groq retired the model this
-# previously named, which is exactly the drift a recording should not preserve.
+# The provider and model these runs were recorded with. Groq retired the model
+# previously named here, which is exactly the drift a recording should not
+# preserve — the live agent now lets a visitor pick from a list fetched off
+# their own provider, so this only fixes what the *recordings* used.
+PROVIDER = "groq"
 MODEL = "openai/gpt-oss-120b"
 MAX_ROUNDS = 5
 ANSWER_MAX_TOKENS = 4096
@@ -163,10 +166,13 @@ def post_agent(base_url: str, key: str, payload: dict, attempt: int = 1) -> dict
     import urllib.error  # noqa: PLC0415
     import urllib.request  # noqa: PLC0415
 
+    # The provider is named in the body; the base URL is resolved server-side
+    # from the fixed provider map, never sent from a caller.
+    payload = {**payload, "provider": PROVIDER, "model": MODEL}
     request = urllib.request.Request(
         f"{base_url.rstrip('/')}/api/agent",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "x-groq-key": key},
+        headers={"Content-Type": "application/json", "x-llm-key": key},
         method="POST",
     )
     try:
@@ -221,6 +227,7 @@ def main() -> int:
             {
                 "id": f"batch-{customer['customer_id']}",
                 "mode": "batch",
+                "provider": PROVIDER,
                 "model": MODEL,
                 "max_rounds": MAX_ROUNDS,
                 "answer_max_tokens": ANSWER_MAX_TOKENS,
@@ -243,6 +250,7 @@ def main() -> int:
             {
                 "id": f"chat-{i}",
                 "mode": "chat",
+                "provider": PROVIDER,
                 "model": MODEL,
                 "max_rounds": MAX_ROUNDS,
                 "answer_max_tokens": ANSWER_MAX_TOKENS,
@@ -258,7 +266,8 @@ def main() -> int:
         time.sleep(PAUSE_BETWEEN_RUNS_SECONDS)
 
     (OUT_DIR / "index.json").write_text(
-        json.dumps({"model": MODEL, "runs": index}, indent=2), encoding="utf-8"
+        json.dumps({"provider": PROVIDER, "model": MODEL, "runs": index}, indent=2),
+        encoding="utf-8",
     )
     print(f"\nWrote {len(index)} recordings to {OUT_DIR.relative_to(ROOT)}")
     return check()

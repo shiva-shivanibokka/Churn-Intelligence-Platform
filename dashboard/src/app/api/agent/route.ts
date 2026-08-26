@@ -1,39 +1,79 @@
 import { NextRequest, NextResponse } from "next/server";
-import GroqClient from "groq-sdk";
-import type { ChatCompletionMessageParam, ChatCompletionTool } from "groq-sdk/resources/chat/completions";
+import OpenAI from "openai";
+import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions";
 import { createClient } from "@supabase/supabase-js";
-import { AGENT_MODEL } from "@/lib/models";
+import { resolveProvider, scrubKeys, type Provider } from "@/lib/providers";
 
 /**
- * Bring-your-own-key, and only that.
+ * Bring-your-own-key, across providers, and only that.
  *
- * There is deliberately no shared key on this deployment. A public agent
- * endpoint backed by the owner's Groq free tier is a 100k-token-a-day budget
- * that any visitor — or any script — can finish, and when they do the feature
- * is dead for everyone else until the daily reset. Worse, it is dead in a way
- * that reads as "this project is broken" rather than "someone used it up".
+ * There is deliberately no key of any kind on this deployment. A public agent
+ * endpoint backed by the owner's free tier is a daily token budget any visitor
+ * — or any script — can finish, and when they do the feature is dead for
+ * everyone else until the reset, in a way that reads as "this project is
+ * broken" rather than "someone used it up".
  *
- * So the visitor brings their own credential. The agent is then never
- * rate-limited by someone else's usage, this project has no secret to leak or
- * rotate, and the demo cannot be turned off by a stranger with a for-loop.
+ * So the visitor brings a credential. This project then has no secret to leak,
+ * rotate or pay for, and the demo cannot be switched off by a stranger.
  *
- * The key travels in a request header, constructs a client for that one
- * request, and is never written down: not to Supabase, not to a log line, not
- * into `retention_actions`, and never into a URL, where it would land in
- * Vercel's access logs and the visitor's browser history.
+ * Every provider in `PROVIDERS` speaks the OpenAI chat-completions dialect
+ * including tool calling, so one client type covers all of them and the choice
+ * of provider is a base URL. The URL is resolved from the fixed map by id —
+ * never taken from the request. Accepting a caller-supplied endpoint alongside
+ * a caller-supplied key is an open proxy: anything with a `fetch` could aim it
+ * at an internal address and read the response back through us.
  *
- * The base URL is deliberately NOT configurable. Accepting a caller-supplied
- * endpoint alongside a caller-supplied key turns this route into an open proxy:
- * anything with a `fetch` could point it at an internal address and read the
- * response back through us. The host is fixed; only the credential varies.
+ * The key travels in a header, builds a client for one request, and is never
+ * written down: not to Supabase, not to a log line, not into
+ * `retention_actions`, and never into a URL, where it would land in Vercel's
+ * access logs and the visitor's browser history.
  */
 
-/** Groq keys look like `gsk_…`. A cheap shape check, not authentication. */
-function readUserKey(req: NextRequest): string | null {
-  const raw = req.headers.get("x-groq-key")?.trim();
-  if (!raw) return null;
-  if (!/^gsk_[A-Za-z0-9]{20,}$/.test(raw)) return null;
-  return raw;
+type AgentCredentials = { provider: Provider; key: string; model: string };
+
+/**
+ * Read the provider, key and model off the request.
+ *
+ * The key is shape-checked against that provider's pattern — a typo filter, not
+ * authentication, and worth having only because "you pasted an OpenAI key while
+ * Groq is selected" is a much better message than a 401 from a third party.
+ */
+function readCredentials(req: NextRequest, body: Record<string, unknown>): AgentCredentials {
+  const provider = resolveProvider(body?.provider);
+  const key = req.headers.get("x-llm-key")?.trim() ?? "";
+
+  if (!key) {
+    throw new MissingKey(
+      `The agent runs on your own ${provider.label} key. Add one to use it — ` +
+        "everything else on this dashboard works without it."
+    );
+  }
+  if (!provider.keyPattern.test(key)) {
+    throw new MissingKey(
+      `That key does not look like a ${provider.label} one — those look like ` +
+        `\`${provider.keyHint}\`. Check the provider selection matches the key you pasted.`
+    );
+  }
+
+  // The model is the visitor's choice from what their provider actually lists,
+  // which is why there is no hardcoded catalogue to fall out of date.
+  const model = typeof body?.model === "string" && body.model.trim()
+    ? body.model.trim()
+    : provider.defaultModel;
+
+  return { provider, key, model };
+}
+
+class MissingKey extends Error {}
+
+/** Provider clients are per-request: never cached, never shared between visitors. */
+function makeClient({ provider, key }: AgentCredentials): OpenAI {
+  return new OpenAI({
+    apiKey: key,
+    baseURL: provider.baseUrl,
+    timeout: REQUEST_TIMEOUT_MS,
+    maxRetries: REQUEST_RETRIES,
+  });
 }
 
 /**
@@ -41,14 +81,11 @@ function readUserKey(req: NextRequest): string | null {
  *
  * Provider SDKs sometimes echo request context into error messages, and this
  * route's catch-all returns the message to the browser. One bad interaction
- * between those two would hand a visitor's credential to whoever is watching,
- * so it is scrubbed on the way out regardless of what any SDK version does.
+ * between those two would hand a visitor's credential to whoever is watching.
  */
-function scrub(text: string): string {
-  return text.replace(/gsk_[A-Za-z0-9]{20,}/g, "gsk_***");
-}
+const scrub = scrubKeys;
 
-/** Groq reports "out of quota" a few different ways. */
+/** Providers report "out of quota" a few different ways. */
 function isQuotaError(err: unknown): boolean {
   const status = (err as { status?: number })?.status;
   if (status === 429) return true;
@@ -62,13 +99,17 @@ function isAuthError(err: unknown): boolean {
 }
 
 /**
- * A hosted model that has been retired.
+ * A model the provider does not serve.
  *
- * This is worth its own branch because it happened: Groq withdrew
+ * Worth its own branch because it happened: Groq withdrew
  * `llama-3.3-70b-versatile` and every request began returning 404
  * `model_not_found`, which reached the browser as a generic 500. The agent
  * looked broken rather than misconfigured, and nothing in CI could notice — the
- * model name is a valid string in correct code that simply stopped existing.
+ * name was a valid string in correct code that stopped existing.
+ *
+ * The model is now the visitor's pick from a list fetched off their provider,
+ * so this should be rare — but a stale selection in sessionStorage can still
+ * name something that has since gone.
  */
 function isRetiredModel(err: unknown): boolean {
   const status = (err as { status?: number })?.status;
@@ -103,8 +144,6 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-key"
 );
 
-// Single source of truth, shared with the sidebar that credits it.
-const MODEL = AGENT_MODEL;
 const MAX_ROUNDS = 5;
 
 // Shared by every call in the loop. The forced final answer used to get 1,500
@@ -115,7 +154,7 @@ const ANSWER_MAX_TOKENS = 4096;
 /**
  * Time budget, because the SDK's defaults turn a rate limit into a hang.
  *
- * groq-sdk retries a 429 on its own, honouring Groq's `retry-after` — which on
+ * The OpenAI SDK retries a 429 on its own, honouring `retry-after` — which on
  * the free tier can be minutes. A single rate-limited request was observed
  * sitting for **5.6 minutes** before dying with "Connection error". On Vercel
  * that is not a slow answer, it is a function timeout at 60 seconds
@@ -708,7 +747,8 @@ function stripThinking(text: string): string {
 }
 
 async function runAgentLoop(
-  groq: GroqClient,
+  client: OpenAI,
+  model: string,
   messages: ChatCompletionMessageParam[],
   mode: "batch" | "chat"
 ): Promise<{ response: string; trace: unknown[]; truncated: boolean }> {
@@ -723,8 +763,8 @@ async function runAgentLoop(
     // wall clock lands on a Vercel timeout, which is a blank page.
     if (Date.now() > deadline - REQUEST_TIMEOUT_MS) break;
 
-    const completion = await groq.chat.completions.create({
-      model: MODEL,
+    const completion = await client.chat.completions.create({
+      model,
       messages: apiMessages,
       tools: TOOLS,
       tool_choice: "auto",
@@ -771,6 +811,12 @@ async function runAgentLoop(
     }
 
     for (const tc of msg.tool_calls) {
+      // The SDK's tool-call type is a union — a `function` call or a `custom`
+      // one — and only the former carries a name and arguments. Nothing here
+      // registers custom tools, so anything else is skipped rather than
+      // reached for blindly.
+      if (tc.type !== "function") continue;
+
       let args: Record<string, unknown> = {};
       try { args = JSON.parse(tc.function.arguments); } catch { /* empty args */ }
 
@@ -838,8 +884,8 @@ async function runAgentLoop(
       ];
 
   try {
-    const final = await groq.chat.completions.create({
-      model: MODEL,
+    const final = await client.chat.completions.create({
+      model,
       messages: finalMessages,
       ...(isBatch
         ? { response_format: { type: "json_object" as const } }
@@ -875,8 +921,8 @@ async function runAgentLoop(
 
 /**
  * This route is public and unauthenticated, on purpose — the demo is meant to
- * be usable by anyone who opens the dashboard. But every request spends Groq
- * free-tier tokens (100k/day for the whole project) and can write rows to
+ * be usable by anyone who opens the dashboard. But every request spends the
+ * visitor's own provider tokens and can write rows to
  * `retention_actions`, so "anyone" also means "anyone with a for-loop": one
  * script can exhaust the day's quota in a couple of minutes and leave the
  * demo dead for everybody else, with a polluted audit trail behind it.
@@ -895,7 +941,7 @@ const hits = new Map<string, number[]>();
 function rateLimited(ip: string): boolean {
   // Generous, because visitors spend their own quota — but not absent. The
   // limit is no longer about protecting a token budget; it stops this route
-  // being used as a general-purpose Groq proxy, and stops a script filling
+  // being used as a general-purpose LLM proxy, and stops a script filling
   // `retention_actions` with junk.
   const max = RATE_LIMIT.maxRequests;
   const now = Date.now();
@@ -933,29 +979,22 @@ function sanitiseHistory(history: ChatCompletionMessageParam[] | undefined) {
 
 export async function POST(req: NextRequest) {
   try {
-    const userKey = readUserKey(req);
-    if (!userKey) {
-      const supplied = req.headers.get("x-groq-key")?.trim();
+    const body = await req.json();
+
+    let credentials;
+    try {
+      credentials = readCredentials(req, body);
+    } catch (err) {
+      // A missing or malformed key is the visitor's to fix, and an unknown
+      // provider id means the request did not come from this UI.
       return NextResponse.json(
-        {
-          error: supplied
-            ? "That does not look like a Groq key — they start with `gsk_`. Copy it " +
-              "whole from console.groq.com."
-            : "The agent runs on your own Groq key. Add one to use it; everything else " +
-              "on this dashboard works without it.",
-          needs_key: true,
-        },
-        { status: 401 }
+        { error: String((err as Error).message ?? err), needs_key: err instanceof MissingKey },
+        { status: err instanceof MissingKey ? 401 : 400 }
       );
     }
 
-    // One client, for this request only. Never cached, never reused across
-    // visitors, gone when the handler returns.
-    const groq = new GroqClient({
-      apiKey: userKey,
-      timeout: REQUEST_TIMEOUT_MS,
-      maxRetries: REQUEST_RETRIES,
-    });
+    const client = makeClient(credentials);
+    const model = credentials.model;
 
     // Vercel sets x-forwarded-for; the first entry is the client.
     const ip = (req.headers.get("x-forwarded-for") ?? "unknown").split(",")[0].trim();
@@ -969,7 +1008,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = await req.json();
     const { mode, customer, message, history } = body as {
       mode: "batch" | "chat";
       customer?: Record<string, unknown>;
@@ -1001,7 +1039,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const { response, trace, truncated } = await runAgentLoop(groq, messages, mode);
+    const { response, trace, truncated } = await runAgentLoop(client, model, messages, mode);
 
     if (mode === "batch") {
       let raw = response;
@@ -1076,8 +1114,10 @@ export async function POST(req: NextRequest) {
       console.error("Agent: visitor key is rate limited or out of quota");
       return NextResponse.json(
         {
-          error: "Groq is rate limiting that key, or its daily quota is spent. The key " +
-            "itself is fine — the free tier resets daily.",
+          error:
+            "Your provider is rate limiting that key, or its quota is spent. The key " +
+            "itself is fine — free tiers usually reset daily, and a twelve-tool agent " +
+            "loop spends a lot of tokens at once.",
           quota_exhausted: true,
         },
         { status: 429 }
@@ -1085,12 +1125,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (isRetiredModel(err)) {
-      console.error(`Agent: Groq no longer serves ${MODEL} — update AGENT_MODEL in src/lib/models.ts`);
+      console.error("Agent: provider does not serve the requested model");
       return NextResponse.json(
         {
-          error: `This deployment is configured to use \`${MODEL}\`, which Groq no ` +
-            "longer serves. That is a configuration problem here, not a problem with " +
-            "your key — hosted model names get retired, and this one has been.",
+          error:
+            "That provider does not serve the model you selected. Hosted model names " +
+            "get retired — pick another from the list, which is fetched from the " +
+            "provider rather than hardcoded here.",
           retired_model: true,
         },
         { status: 503 }
@@ -1098,10 +1139,12 @@ export async function POST(req: NextRequest) {
     }
 
     if (isAuthError(err)) {
-      console.error("Agent: Groq rejected the visitor's key");
+      console.error("Agent: provider rejected the visitor's key");
       return NextResponse.json(
         {
-          error: "Groq rejected that key. Check it was copied whole from console.groq.com.",
+          error:
+            "Your provider rejected that key. Check it was copied whole, and that the " +
+            "provider selection matches where the key came from.",
           invalid_key: true,
           needs_key: true,
         },

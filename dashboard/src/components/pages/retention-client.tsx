@@ -4,6 +4,13 @@ import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { PersuadableCustomer } from "@/lib/data";
 import { PageTitle, SectionHeading } from "@/components/ui/section-heading";
 import { MetricCard } from "@/components/ui/metric-card";
+import {
+  DEFAULT_PROVIDER,
+  PROVIDERS,
+  PROVIDER_IDS,
+  isProviderId,
+  type ProviderId,
+} from "@/lib/providers";
 
 interface Props { persuadables: PersuadableCustomer[] }
 
@@ -484,38 +491,74 @@ function AgentTrace({ trace, defaultOpen = false }: { trace: TraceStep[]; defaul
  * a request header and never as a query parameter — a key in a URL ends up in
  * server access logs and browser history, where nobody thinks to clear it.
  */
-const KEY_STORAGE = "churn-engine.groq-key";
-
 /**
- * sessionStorage as an external store, read through useSyncExternalStore.
+ * Provider, key and model, kept in sessionStorage as an external store.
  *
- * The obvious approach — `useState("")` plus an effect that reads storage on
- * mount — sets state during an effect and triggers a second render pass on
- * every load. Reading it in a lazy initialiser instead is worse: the server
- * renders an empty key and the client renders the stored one, which is a
- * hydration mismatch.
+ * sessionStorage rather than localStorage: the credential survives navigating
+ * between the dashboard's pages and disappears when the tab closes, which is
+ * the right lifetime for something someone pasted into a demo.
  *
- * This is precisely what useSyncExternalStore is for. `getServerSnapshot`
- * returns the empty string, so SSR and the first client paint agree, and React
- * resubscribes to the real value immediately afterwards.
+ * Read through `useSyncExternalStore` rather than `useState` plus an effect.
+ * The effect version sets state during an effect and re-renders on every load;
+ * reading storage in a lazy initialiser is worse still, because the server
+ * renders an empty value and the client renders the stored one — a hydration
+ * mismatch. `getServerSnapshot` returns the empty settings so SSR and the first
+ * client paint agree, and React resubscribes immediately after.
  */
-const keyStore = {
-  listeners: new Set<() => void>(),
+const SETTINGS_STORAGE = "churn-engine.llm";
 
-  read(): string {
+type LlmSettings = { provider: ProviderId; key: string; model: string };
+
+const EMPTY_SETTINGS: LlmSettings = { provider: DEFAULT_PROVIDER, key: "", model: "" };
+
+const settingsStore = {
+  listeners: new Set<() => void>(),
+  cache: EMPTY_SETTINGS,
+  raw: "",
+
+  read(): LlmSettings {
+    let raw = "";
     try {
-      return window.sessionStorage.getItem(KEY_STORAGE) ?? "";
+      raw = window.sessionStorage.getItem(SETTINGS_STORAGE) ?? "";
     } catch {
-      // Private browsing and blocked storage: the panel still works, the key
-      // just does not survive navigating between pages.
-      return "";
+      // Private browsing and blocked storage: the panel still works, the
+      // settings just do not survive navigating between pages.
+      return EMPTY_SETTINGS;
     }
+    // useSyncExternalStore compares snapshots by identity and will loop
+    // forever if getSnapshot returns a fresh object each call, so the parsed
+    // value is cached against the raw string it came from.
+    if (raw === this.raw) return this.cache;
+    this.raw = raw;
+    try {
+      const parsed = JSON.parse(raw) as Partial<LlmSettings>;
+      this.cache = {
+        provider: isProviderId(parsed.provider) ? parsed.provider : DEFAULT_PROVIDER,
+        key: typeof parsed.key === "string" ? parsed.key : "",
+        model: typeof parsed.model === "string" ? parsed.model : "",
+      };
+    } catch {
+      this.cache = EMPTY_SETTINGS;
+    }
+    return this.cache;
   },
 
-  write(value: string) {
+  write(value: LlmSettings) {
+    // Persist a bare provider choice too, not just a key.
+    //
+    // Clearing storage whenever the key was empty meant selecting a provider
+    // did nothing at all: the write removed the entry, the next read returned
+    // the defaults, and the UI snapped straight back to Groq — so the picker
+    // looked broken while behaving exactly as written. Anything other than the
+    // untouched default is worth remembering.
+    const isDefault =
+      !value.key && !value.model && value.provider === DEFAULT_PROVIDER;
     try {
-      if (value) window.sessionStorage.setItem(KEY_STORAGE, value);
-      else window.sessionStorage.removeItem(KEY_STORAGE);
+      if (isDefault) {
+        window.sessionStorage.removeItem(SETTINGS_STORAGE);
+      } else {
+        window.sessionStorage.setItem(SETTINGS_STORAGE, JSON.stringify(value));
+      }
     } catch {
       // Non-fatal — see above.
     }
@@ -523,49 +566,108 @@ const keyStore = {
   },
 
   subscribe(listener: () => void) {
-    keyStore.listeners.add(listener);
+    settingsStore.listeners.add(listener);
     // Another tab clearing the key should clear it here too.
     window.addEventListener("storage", listener);
     return () => {
-      keyStore.listeners.delete(listener);
+      settingsStore.listeners.delete(listener);
       window.removeEventListener("storage", listener);
     };
   },
 };
 
-function useGroqKey(): [string, (key: string) => void] {
-  const key = useSyncExternalStore(
-    keyStore.subscribe,
-    () => keyStore.read(),
-    () => "",
+function useLlmSettings(): [LlmSettings, (next: LlmSettings) => void] {
+  const settings = useSyncExternalStore(
+    settingsStore.subscribe,
+    () => settingsStore.read(),
+    () => EMPTY_SETTINGS,
   );
-  const setKey = useCallback((value: string) => keyStore.write(value), []);
-  return [key, setKey];
+  const setSettings = useCallback((next: LlmSettings) => settingsStore.write(next), []);
+  return [settings, setSettings];
 }
 
+/**
+ * Where the visitor chooses a provider and supplies their own key.
+ *
+ * This deployment holds no LLM credential at all. A public agent endpoint
+ * backed by the owner's free tier is a daily token budget any visitor can
+ * finish, and once finished the feature is dead for everyone until the reset —
+ * dead in a way that reads as "this project is broken".
+ *
+ * The model list is fetched from the provider with the visitor's key rather
+ * than hardcoded, which is not just convenience: this project shipped a dead
+ * agent for weeks because Groq retired the model it named, and nothing in a
+ * type check or a test suite can notice a valid string that stopped existing.
+ * The provider is the only authority on what it serves.
+ */
 function ApiKeyPanel({
-  apiKey,
+  settings,
   onChange,
   invalid,
 }: {
-  apiKey: string;
-  onChange: (key: string) => void;
+  settings: LlmSettings;
+  onChange: (next: LlmSettings) => void;
   invalid: boolean;
 }) {
-  const [draft, setDraft] = useState("");
+  const [draftKey, setDraftKey] = useState("");
   const [open, setOpen] = useState(false);
+  const [models, setModels] = useState<string[] | null>(null);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelNote, setModelNote] = useState<string | null>(null);
 
-  const configured = apiKey.length > 0;
-  const masked = configured ? `gsk_••••••••${apiKey.slice(-4)}` : "";
-
-  // Collapsed once a key is in place: it is setup, not a control the visitor
-  // needs in front of them while working.
+  const provider = PROVIDERS[settings.provider];
+  const configured = settings.key.length > 0;
+  const masked = configured ? `${settings.key.slice(0, 7)}…${settings.key.slice(-4)}` : "";
   const expanded = open || !configured || invalid;
+
+  /** Ask the provider what it serves, with the key the visitor just gave us. */
+  const loadModels = useCallback(async (next: LlmSettings) => {
+    if (!next.key) return;
+    setLoadingModels(true);
+    setModelNote(null);
+    try {
+      const res = await fetch("/api/agent/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-llm-key": next.key },
+        body: JSON.stringify({ provider: next.provider }),
+      });
+      const data = await res.json();
+      setModels(data.models ?? []);
+      if (data.error) setModelNote(data.error);
+      // Only adopt a suggestion when the visitor has not chosen for themselves,
+      // or when their choice is not on the list this provider returned.
+      if (data.suggested && (!next.model || !(data.models ?? []).includes(next.model))) {
+        onChange({ ...next, model: data.suggested });
+        return;
+      }
+    } catch (e) {
+      setModels([]);
+      setModelNote(`Could not list models: ${e}`);
+    } finally {
+      setLoadingModels(false);
+    }
+  }, [onChange]);
+
+  const applyKey = useCallback(() => {
+    const key = draftKey.trim();
+    if (!key) return;
+    // The model is cleared deliberately: a model name from the previous
+    // provider is meaningless to the new one.
+    const next = { ...settings, key, model: "" };
+    onChange(next);
+    setDraftKey("");
+    setOpen(false);
+    void loadModels(next);
+  }, [draftKey, settings, onChange, loadModels]);
 
   return (
     <div
       className={`rounded-2xl border-2 mb-6 overflow-hidden ${
-        invalid ? "border-[#FECACA] bg-[#FEF2F2]" : configured ? "border-[#DDD6FE] bg-white" : "border-[#FDE68A] bg-[#FFFBEB]"
+        invalid
+          ? "border-[#FECACA] bg-[#FEF2F2]"
+          : configured
+            ? "border-[#DDD6FE] bg-white"
+            : "border-[#FDE68A] bg-[#FFFBEB]"
       }`}
     >
       <button
@@ -575,9 +677,17 @@ function ApiKeyPanel({
       >
         <span className="flex items-center gap-2.5 text-[14px] font-bold text-[#1E1B4B]">
           <span aria-hidden="true">{configured && !invalid ? "🔑" : "⚠️"}</span>
-          {configured && !invalid
-            ? <>Using your Groq key <span className="font-mono font-normal text-[13px] text-[#6B7280]">{masked}</span></>
-            : "The AI agent needs your Groq API key"}
+          {configured && !invalid ? (
+            <>
+              {provider.label}
+              <span className="font-mono font-normal text-[13px] text-[#6B7280]">{masked}</span>
+              {settings.model && (
+                <span className="font-normal text-[13px] text-[#6B7280]">· {settings.model}</span>
+              )}
+            </>
+          ) : (
+            "The AI agent needs an API key — yours, from any of six providers"
+          )}
         </span>
         <span className="text-[12px] font-semibold text-[#6366F1] shrink-0">
           {expanded ? "Hide" : "Change"}
@@ -585,66 +695,149 @@ function ApiKeyPanel({
       </button>
 
       {expanded && (
-        <div className="px-5 pb-5 pt-1">
-          <p className="text-[13px] text-[#4B5563] leading-relaxed mb-3">
-            This demo deliberately ships without a Groq key of its own. A shared free
-            tier is 100,000 tokens a day for every visitor combined, so the first
+        <div className="px-5 pb-5 pt-1 space-y-4">
+          <p className="text-[13px] text-[#4B5563] leading-relaxed">
+            This demo deliberately ships without an LLM key of its own. A shared free
+            tier is one daily token budget for every visitor combined, so the first
             person to hold down the button turns the agent off for everyone else.
-            Bringing your own means the agent is never queued behind a stranger.{" "}
-            <a
-              href="https://console.groq.com/keys"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-semibold text-[#4F46E5] underline underline-offset-2"
-            >
-              Groq keys are free
-            </a>{" "}
-            and take about a minute to create.
+            Bringing your own means it is never queued behind a stranger — and the
+            other four dashboard pages need no key at all.
           </p>
 
-          <p className="text-[12px] text-[#6B7280] leading-relaxed mb-3">
-            Your key is kept in this browser tab only, sent as a request header to
-            this site&rsquo;s own agent route, and forwarded to Groq. It is never
-            stored on the server, never written to the database, never logged, and
-            never placed in a URL. Close the tab and it is gone. The other four
-            dashboard pages need no key at all.
-          </p>
-
-          <div className="flex gap-2 flex-wrap items-center">
-            <input
-              type="password"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && draft.trim()) {
-                  onChange(draft.trim());
-                  setDraft("");
-                  setOpen(false);
-                }
-              }}
-              placeholder="gsk_…"
-              autoComplete="off"
-              spellCheck={false}
-              aria-label="Groq API key"
-              className="flex-1 min-w-[240px] rounded-xl border-2 border-[#818CF8] bg-white px-4 py-2.5 text-[14px] font-mono text-[#1E1B4B] focus:outline-none focus:border-[#4F46E5]"
-            />
-            <button
-              onClick={() => { onChange(draft.trim()); setDraft(""); setOpen(false); }}
-              disabled={!draft.trim()}
-              className="px-5 py-2.5 rounded-xl font-bold text-[14px] text-white disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ background: "linear-gradient(135deg, #6366F1, #4338CA)" }}
-            >
-              Use this key
-            </button>
-            {configured && (
-              <button
-                onClick={() => { onChange(""); setDraft(""); }}
-                className="px-4 py-2.5 rounded-xl font-semibold text-[14px] text-[#6B7280] border-2 border-[#DDD6FE] bg-white hover:border-[#818CF8]"
+          {/* Provider */}
+          <div>
+            <label className="block text-[12px] font-bold uppercase tracking-wide text-[#7C3AED] mb-1.5">
+              Provider
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {PROVIDER_IDS.map((id) => (
+                <button
+                  key={id}
+                  onClick={() => {
+                    // Switching provider invalidates both the key and the model.
+                    setModels(null);
+                    setModelNote(null);
+                    onChange({ provider: id, key: "", model: "" });
+                    setDraftKey("");
+                  }}
+                  className={`px-3.5 py-2 rounded-xl text-[13px] font-semibold border-2 transition-all ${
+                    settings.provider === id
+                      ? "border-[#4F46E5] bg-[#EEF2FF] text-[#4338CA]"
+                      : "border-[#DDD6FE] bg-white text-[#6B7280] hover:border-[#818CF8]"
+                  }`}
+                >
+                  {PROVIDERS[id].label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[12px] text-[#6B7280] mt-1.5">
+              {provider.note}{" "}
+              <a
+                href={provider.keyUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-[#4F46E5] underline underline-offset-2"
               >
-                Forget it
-              </button>
-            )}
+                Get your {provider.label} key
+              </a>
+            </p>
           </div>
+
+          {/* Key */}
+          <div>
+            <label
+              htmlFor="llm-key"
+              className="block text-[12px] font-bold uppercase tracking-wide text-[#7C3AED] mb-1.5"
+            >
+              {provider.label} API key
+            </label>
+            <div className="flex gap-2 flex-wrap items-center">
+              <input
+                id="llm-key"
+                type="password"
+                value={draftKey}
+                onChange={(e) => setDraftKey(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") applyKey(); }}
+                placeholder={provider.keyHint}
+                autoComplete="off"
+                spellCheck={false}
+                className="flex-1 min-w-[240px] rounded-xl border-2 border-[#818CF8] bg-white px-4 py-2.5 text-[14px] font-mono text-[#1E1B4B] focus:outline-none focus:border-[#4F46E5]"
+              />
+              <button
+                onClick={applyKey}
+                disabled={!draftKey.trim()}
+                className="px-5 py-2.5 rounded-xl font-bold text-[14px] text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ background: "linear-gradient(135deg, #6366F1, #4338CA)" }}
+              >
+                Use this key
+              </button>
+              {configured && (
+                <button
+                  onClick={() => {
+                    onChange({ ...settings, key: "", model: "" });
+                    setDraftKey("");
+                    setModels(null);
+                  }}
+                  className="px-4 py-2.5 rounded-xl font-semibold text-[14px] text-[#6B7280] border-2 border-[#DDD6FE] bg-white hover:border-[#818CF8]"
+                >
+                  Forget it
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Model */}
+          {configured && (
+            <div>
+              <label
+                htmlFor="llm-model"
+                className="block text-[12px] font-bold uppercase tracking-wide text-[#7C3AED] mb-1.5"
+              >
+                Model
+              </label>
+              <div className="flex gap-2 flex-wrap items-center">
+                {models && models.length > 0 ? (
+                  <select
+                    id="llm-model"
+                    value={settings.model}
+                    onChange={(e) => onChange({ ...settings, model: e.target.value })}
+                    className="flex-1 min-w-[260px] rounded-xl border-2 border-[#818CF8] bg-white px-4 py-2.5 text-[14px] text-[#1E1B4B] font-medium focus:outline-none focus:border-[#4F46E5]"
+                  >
+                    {models.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    id="llm-model"
+                    value={settings.model}
+                    onChange={(e) => onChange({ ...settings, model: e.target.value })}
+                    placeholder={provider.defaultModel}
+                    spellCheck={false}
+                    className="flex-1 min-w-[260px] rounded-xl border-2 border-[#818CF8] bg-white px-4 py-2.5 text-[14px] font-mono text-[#1E1B4B] focus:outline-none focus:border-[#4F46E5]"
+                  />
+                )}
+                <button
+                  onClick={() => void loadModels(settings)}
+                  disabled={loadingModels}
+                  className="px-4 py-2.5 rounded-xl font-semibold text-[14px] text-[#4F46E5] border-2 border-[#DDD6FE] bg-white hover:border-[#818CF8] disabled:opacity-50"
+                >
+                  {loadingModels ? "Listing…" : "List models"}
+                </button>
+              </div>
+              <p className="text-[12px] text-[#6B7280] mt-1.5">
+                {modelNote ??
+                  "Fetched from the provider with your key, not hardcoded here — model names get retired, and this one did."}
+              </p>
+            </div>
+          )}
+
+          <p className="text-[12px] text-[#6B7280] leading-relaxed">
+            Your key is kept in this browser tab only, sent as a request header to this
+            site&rsquo;s own agent route, and forwarded to {provider.label}. It is never
+            stored on the server, never written to the database, never logged, and never
+            placed in a URL. Close the tab and it is gone.
+          </p>
         </div>
       )}
     </div>
@@ -733,7 +926,7 @@ function PlanResult({ action, heading = "AI-Generated Retention Plan" }: { actio
 }
 
 /**
- * Recorded agent runs, for visitors without a Groq key.
+ * Recorded agent runs, for visitors without an API key.
  *
  * These are not mock-ups. Each one is a real call to this same `/api/agent`
  * route, made against the live Supabase data with a real key, captured by
@@ -919,28 +1112,30 @@ export function RetentionClient({ persuadables }: Props) {
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [tab, setTab] = useState<"batch" | "chat" | "replay">("replay");
-  const [apiKey, setApiKey] = useGroqKey();
+  const [settings, setSettings] = useLlmSettings();
   const [keyRejected, setKeyRejected] = useState(false);
 
-  const updateKey = useCallback((key: string) => {
-    setApiKey(key);
-    // A newly supplied key deserves a fresh verdict; leaving the rejection up
-    // would keep the panel red after the visitor fixed the problem.
+  const updateSettings = useCallback((next: LlmSettings) => {
+    setSettings(next);
+    // New settings deserve a fresh verdict; leaving the rejection up would keep
+    // the panel red after the visitor fixed the problem.
     setKeyRejected(false);
-  }, [setApiKey]);
+  }, [setSettings]);
 
   /**
-   * The agent route requires the visitor's own key, so it goes in a header.
+   * The agent route runs on the visitor's own key, so it goes in a header.
    *
    * Not a query parameter and not the request body: headers are the one place a
    * credential does not get written to a server access log or left in the
-   * browser's history.
+   * browser's history. The provider and model travel in the body, because they
+   * are choices rather than secrets — and the base URL is resolved server-side
+   * from the provider id, never sent from here.
    */
   const agentHeaders = useCallback((): HeadersInit => {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (apiKey) headers["x-groq-key"] = apiKey;
+    if (settings.key) headers["x-llm-key"] = settings.key;
     return headers;
-  }, [apiKey]);
+  }, [settings.key]);
 
   const selected = useMemo(() => persuadables.find((c) => c.customer_id === selectedId), [persuadables, selectedId]);
 
@@ -952,7 +1147,12 @@ export function RetentionClient({ persuadables }: Props) {
       const res = await fetch("/api/agent", {
         method: "POST",
         headers: agentHeaders(),
-        body: JSON.stringify({ mode: "batch", customer: selected }),
+        body: JSON.stringify({
+          mode: "batch",
+          customer: selected,
+          provider: settings.provider,
+          model: settings.model,
+        }),
       });
       const data = await res.json();
       if (data.needs_key || data.invalid_key) setKeyRejected(true);
@@ -976,7 +1176,13 @@ export function RetentionClient({ persuadables }: Props) {
       const res = await fetch("/api/agent", {
         method: "POST",
         headers: agentHeaders(),
-        body: JSON.stringify({ mode: "chat", message: chatInput, history: chatMessages.map(({ role, content }) => ({ role, content })) }),
+        body: JSON.stringify({
+          mode: "chat",
+          message: chatInput,
+          history: chatMessages.map(({ role, content }) => ({ role, content })),
+          provider: settings.provider,
+          model: settings.model,
+        }),
       });
       const data = await res.json();
       if (data.needs_key || data.invalid_key) setKeyRejected(true);
@@ -997,7 +1203,7 @@ export function RetentionClient({ persuadables }: Props) {
       <PageTitle>Retention Actions</PageTitle>
 
       {tab !== "replay" && (
-        <ApiKeyPanel apiKey={apiKey} onChange={updateKey} invalid={keyRejected} />
+        <ApiKeyPanel settings={settings} onChange={updateSettings} invalid={keyRejected} />
       )}
 
       <div className="flex gap-2 mb-6">

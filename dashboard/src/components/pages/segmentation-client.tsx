@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { SegmentSummaryRow, UmapPoint } from "@/lib/data";
+import { SegmentSummaryRow, UmapColumns } from "@/lib/data";
 import { PageTitle, SectionHeading } from "@/components/ui/section-heading";
 import { MetricCard } from "@/components/ui/metric-card";
 import { ChartCard } from "@/components/ui/chart-card";
@@ -73,7 +73,7 @@ const UMAP_CAPTIONS: Record<string, { label: string; caption: string }> = {
   },
 };
 
-interface Props { summary: SegmentSummaryRow[]; umap: UmapPoint[] }
+interface Props { summary: SegmentSummaryRow[]; umap: UmapColumns }
 
 export function SegmentationClient({ summary, umap }: Props) {
   const [colorBy, setColorBy] = useState("Segment");
@@ -88,47 +88,58 @@ export function SegmentationClient({ summary, umap }: Props) {
     })), [summary]);
 
   const umapTraces = useMemo(() => {
+    const n = umap.x.length;
+    // Hover text is built once per point either way, so it is the one place the
+    // columnar layout costs a little readability. Everything else reads the
+    // arrays straight through to Plotly, which wanted arrays to begin with.
+    const hover = (i: number) =>
+      `Customer ${umap.ids[i]}<br>Seg: ${umap.segments[umap.seg[i]]}<br>Prob: ${(umap.prob[i] * 100).toFixed(1)}%`;
+
     if (colorBy === "Segment") {
-      const bySegment: Record<string, UmapPoint[]> = {};
-      for (const p of umap) {
-        if (!bySegment[p.segment]) bySegment[p.segment] = [];
-        bySegment[p.segment].push(p);
-      }
-      return Object.entries(bySegment).map(([seg, rows]) => ({
-        type: "scatter" as const,
-        mode: "markers" as const,
-        name: seg,
-        x: rows.map((r) => r.umap_1),
-        y: rows.map((r) => r.umap_2),
-        text: rows.map((r) => `Customer ${r.customer_id}<br>Seg: ${r.segment}<br>Churn Prob: ${(r.churn_probability * 100).toFixed(1)}%`),
-        marker: { size: 7, color: SEGMENT_COLORS[seg] ?? "#6B7280", opacity: 0.82, line: { width: 0.6, color: "white" } },
-        hovertemplate: "%{text}<extra>%{fullData.name}</extra>",
-      }));
+      return umap.segments.map((name, segIdx) => {
+        const rows: number[] = [];
+        for (let i = 0; i < n; i++) if (umap.seg[i] === segIdx) rows.push(i);
+        return {
+          type: "scattergl" as const,
+          mode: "markers" as const,
+          name,
+          x: rows.map((i) => umap.x[i]),
+          y: rows.map((i) => umap.y[i]),
+          text: rows.map(hover),
+          hoverinfo: "text" as const,
+          marker: { size: 4, opacity: 0.7, color: SEGMENT_COLORS[name] ?? "#6B7280" },
+        };
+      });
     }
 
-    const colorValues = umap.map((c) => {
-      if (colorBy === "Churn") return c.churn;
-      if (colorBy === "ChurnProbability") return c.churn_probability;
-      if (colorBy === "UpliftScore") return c.uplift_score;
-      if (colorBy === "RiskTier") return c.risk_tier === "High Risk" ? 1 : c.risk_tier === "Medium Risk" ? 0.5 : 0;
-      return 0;
+    const colorValues = Array.from({ length: n }, (_, i) => {
+      if (colorBy === "Churn") return umap.churn[i];
+      if (colorBy === "UpliftScore") return umap.uplift[i];
+      // Risk tier is a fixed function of the calibrated probability, so it is
+      // derived here rather than shipped as a repeated string per point.
+      if (colorBy === "RiskTier") return umap.prob[i] >= 0.6 ? 1 : umap.prob[i] >= 0.3 ? 0.5 : 0;
+      return umap.prob[i];
     });
 
-    const colorscale = colorBy === "UpliftScore" ? COLORSCALE_HIGH_GOOD : COLORSCALE_HIGH_BAD;
-    const vals = colorValues as number[];
-    const absMax = Math.max(Math.abs(Math.min(...vals)), Math.abs(Math.max(...vals)));
-    const cmin = colorBy === "UpliftScore" ? -absMax : undefined;
-    const cmax = colorBy === "UpliftScore" ? absMax : undefined;
-
     return [{
-      type: "scatter" as const,
+      type: "scattergl" as const,
       mode: "markers" as const,
-      name: colorBy,
-      x: umap.map((c) => c.umap_1),
-      y: umap.map((c) => c.umap_2),
-      marker: { size: 7, color: colorValues, colorscale, cmin, cmax, showscale: true, opacity: 0.82, line: { width: 0.6, color: "white" }, colorbar: { thickness: 14, len: 0.8, tickfont: { size: 11 } } },
-      text: umap.map((c) => `Customer ${c.customer_id}<br>Seg: ${c.segment}<br>Prob: ${(c.churn_probability * 100).toFixed(1)}%`),
-      hovertemplate: "%{text}<extra></extra>",
+      x: umap.x,
+      y: umap.y,
+      text: Array.from({ length: n }, (_, i) => hover(i)),
+      hoverinfo: "text" as const,
+      marker: {
+        size: 4,
+        opacity: 0.75,
+        color: colorValues,
+        // Direction matters here, and inlining one scale for everything got it
+        // wrong: a high UpliftScore is *good* — the intervention helps that
+        // customer most — so painting it red said the opposite of what the
+        // number means. Churn and risk keep green→red; uplift is reversed.
+        colorscale: colorBy === "UpliftScore" ? COLORSCALE_HIGH_GOOD : COLORSCALE_HIGH_BAD,
+        showscale: true,
+        colorbar: { thickness: 12, len: 0.7 },
+      },
     }];
   }, [colorBy, umap]);
 

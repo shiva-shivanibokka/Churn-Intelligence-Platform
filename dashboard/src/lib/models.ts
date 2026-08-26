@@ -8,22 +8,19 @@
  */
 
 /**
- * Passed to Groq. Changing this changes what the sidebar credits.
+ * What the sidebar credits when no visitor has chosen anything.
  *
- * Hosted model names expire. This was `llama-3.3-70b-versatile` until Groq
- * retired it, at which point every agent request started returning
- * `404 model_not_found` — and because nothing exercised the live path, the
- * dashboard sat there for weeks with an agent that answered every question with
- * a 500. Neither CI nor a typecheck can catch it: the string is valid, the code
- * is correct, and the model simply stopped existing.
+ * The agent model used to be a build-time constant here, which is how this
+ * project shipped a dead agent for weeks: Groq retired the name it held, every
+ * request returned `404 model_not_found`, and nothing in a type check or test
+ * suite can notice a valid string that stopped existing.
  *
- * If the agent starts failing, check this first — list what the key can reach:
- *     npx tsx -e "import G from 'groq-sdk'; new G().models.list().then(r => console.log(r.data.map(m => m.id).sort()))"
+ * It is no longer a constant. Each visitor picks a provider and a model from a
+ * list fetched off that provider with their own key — see `src/lib/providers.ts`
+ * — so there is nothing here to go stale. This label is only what the footer
+ * says before anyone has chosen.
  */
-export const AGENT_MODEL = "openai/gpt-oss-120b";
-
-/** Human-readable form of the same thing, for UI. */
-export const AGENT_MODEL_LABEL = "Groq GPT-OSS 120B";
+export const AGENT_MODEL_LABEL = "Bring your own model";
 
 /**
  * The 2D embedding shown on the segmentation page.
