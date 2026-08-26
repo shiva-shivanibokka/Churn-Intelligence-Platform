@@ -43,17 +43,27 @@ function computeSummary(actions: RetentionAction[]) {
 export function AnalyticsClient({ actions: initialActions }: Props) {
   const [actions, setActions] = useState(initialActions);
   const [saving, setSaving] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const summary = useMemo(() => computeSummary(actions), [actions]);
 
   const updateOutcome = useCallback(async (action: RetentionAction, outcome: string) => {
     if (saving) return;
     setSaving(action.id);
+    setSaveError(null);
     try {
       await saveFeedback(action.id, action.customer_id, outcome);
       setActions((prev) => prev.map((a) => a.id === action.id ? { ...a, outcome } : a));
-    } catch {
-      // silent — user can retry
+    } catch (err) {
+      // This used to be an empty catch with the comment "silent — user can
+      // retry". Retry what? The button simply did nothing: no row written, no
+      // state change, no message. A blocked insert and a click that was never
+      // made looked identical, which is the same failure that let the agent's
+      // saves disappear for six weeks. If the outcome did not record, say so.
+      setSaveError(
+        `Could not record "${outcome}" for ${action.customer_id}: ` +
+        `${err instanceof Error ? err.message : String(err)}`
+      );
     }
     setSaving(null);
   }, [saving]);
@@ -69,6 +79,15 @@ export function AnalyticsClient({ actions: initialActions }: Props) {
       <div className="bg-[#EEF2FF] border-l-4 border-[#6366F1] rounded-r-xl px-4 py-2.5 mb-6 text-[13px] text-[#1E1B4B]">
         All numbers below are computed live from your <strong>retention_actions</strong> and <strong>intervention_feedback</strong> tables in Supabase. Clicking ✓ Retained or ✗ Churned in the action log updates every card and table instantly — no page reload needed.
       </div>
+
+      {saveError && (
+        <div
+          role="alert"
+          className="bg-[#FEF2F2] border-l-4 border-[#DC2626] rounded-r-xl px-4 py-3 mb-6 text-[13px] text-[#7F1D1D]"
+        >
+          <strong>Not recorded.</strong> {saveError}
+        </div>
+      )}
 
       {/* Campaign Summary */}
       <SectionHeading>Campaign Summary</SectionHeading>

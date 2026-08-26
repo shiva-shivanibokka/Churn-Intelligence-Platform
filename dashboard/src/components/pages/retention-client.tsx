@@ -119,7 +119,7 @@ function renderToolResult(tool: string, result: Record<string, unknown>) {
       <div className="space-y-1 text-[12px]">
         <div className="flex gap-1"><span className="text-[#7C3AED] font-semibold">Recommended:</span><span className="text-[#1E1B4B] font-semibold">{String(result.intervention ?? "—")}</span></div>
         <div className="flex gap-1"><span className="text-[#7C3AED] font-semibold">Cost:</span><span className="text-[#1E1B4B]">{String(result.cost ?? "—")}</span></div>
-        <p className="text-[#1E1B4B] italic mt-1">"{String(result.message ?? "")}"</p>
+        <p className="text-[#1E1B4B] italic mt-1">&ldquo;{String(result.message ?? "")}&rdquo;</p>
       </div>
     );
   }

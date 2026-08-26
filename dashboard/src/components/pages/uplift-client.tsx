@@ -6,7 +6,7 @@ import { UpliftKpis, CustomerTypeSummary, RoiBySegment, TopPersuadable, UpliftSc
 import { PageTitle, SectionHeading } from "@/components/ui/section-heading";
 import { MetricCard } from "@/components/ui/metric-card";
 import { ChartCard } from "@/components/ui/chart-card";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
@@ -96,7 +96,7 @@ export function UpliftClient({ kpis, typeSummary, roiBySeg, topPersuadables, sca
       {/* Uplift quadrant scatter */}
       <SectionHeading>Uplift Quadrant — Who to Target</SectionHeading>
       <div className="bg-[#EEF2FF] border border-[#DDD6FE] rounded-xl px-4 py-2.5 mb-3 text-[13px] text-[#4338CA]">
-        X-axis = churn probability (how likely they are to leave). Y-axis = uplift score (how much an intervention helps). The <strong>top-right quadrant</strong> (high churn risk + high uplift) contains your Persuadables — the only customers worth spending budget on. Dashed lines show the thresholds. Don't waste spend on the top-left (Sure Things stay anyway) or bottom-right (Sleeping Dogs: intervening makes them more likely to leave).
+        X-axis = churn probability (how likely they are to leave). Y-axis = uplift score (how much an intervention helps). The <strong>top-right quadrant</strong> (high churn risk + high uplift) contains your Persuadables — the only customers worth spending budget on. Dashed lines show the thresholds. Don&rsquo;t waste spend on the top-left (Sure Things stay anyway) or bottom-right (Sleeping Dogs: intervening makes them more likely to leave).
       </div>
       <ChartCard>
         <Plot

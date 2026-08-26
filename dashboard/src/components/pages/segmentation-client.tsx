@@ -7,6 +7,7 @@ import { PageTitle, SectionHeading } from "@/components/ui/section-heading";
 import { MetricCard } from "@/components/ui/metric-card";
 import { ChartCard } from "@/components/ui/chart-card";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { EMBEDDING_LABEL } from "@/lib/models";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
@@ -56,7 +57,7 @@ const UMAP_CAPTIONS: Record<string, { label: string; caption: string }> = {
   },
   Churn: {
     label: "Coloured by Actual Churn (0 = stayed, 1 = churned)",
-    caption: "Green = customer stayed, Red = customer actually churned. Churners clustering in specific regions of the map validates that UMAP preserved the churn signal — the model is learning real patterns. Note: the colours are green and red (high = red using the green→amber→red scale).",
+    caption: "Green = customer stayed, Red = customer actually churned. Churners clustering in specific regions of the map validates that the embedding preserved the churn signal — the model is learning real patterns. Note: the colours are green and red (high = red using the green→amber→red scale).",
   },
   RiskTier: {
     label: "Coloured by Predicted Risk Tier",
@@ -198,7 +199,7 @@ export function SegmentationClient({ summary, umap }: Props) {
       </div>
 
       {/* UMAP */}
-      <SectionHeading>Customer Behavioural Space — UMAP 2D Projection</SectionHeading>
+      <SectionHeading>Customer Behavioural Space — {EMBEDDING_LABEL} 2D Projection</SectionHeading>
       <div className="flex flex-wrap items-center gap-3 mb-3">
         <label className="text-[13px] font-semibold text-[#6366F1]">Colour by:</label>
         <select
@@ -243,7 +244,7 @@ export function SegmentationClient({ summary, umap }: Props) {
       {/* Heatmap */}
       <SectionHeading>Segment Feature Heatmap — What Makes Each Segment Different</SectionHeading>
       <div className="bg-[#F5F3FF] border border-[#DDD6FE] rounded-xl px-4 py-2.5 mb-3 text-[13px] text-[#4338CA]">
-        Average value of key raw features per segment. Use this to validate the segment labels: Champions should have high tenure and cashback; Lapsed should have high days-since-last-order and low app hours; Price Sensitive should have high cashback (discount-driven). If the bars don't match the expected pattern, the segment labeling may be off.
+        Average value of key raw features per segment. Use this to validate the segment labels: Champions should have high tenure and cashback; Lapsed should have high days-since-last-order and low app hours; Price Sensitive should have high cashback (discount-driven). If the bars don&rsquo;t match the expected pattern, the segment labeling may be off.
       </div>
       <ChartCard>
         <Plot
@@ -339,7 +340,7 @@ export function SegmentationClient({ summary, umap }: Props) {
             ["Avg Predicted Prob", "Mean output of the per-segment CatBoost classifier for customers in this segment (0–100%). Calibrated with isotonic regression."],
             ["High Risk %", "% of the segment the model predicts has >60% probability of churning."],
             ["Persuadable %", "% of the segment where the T-S uplift model predicts a retention intervention would help."],
-            ["UMAP", "Dimensionality reduction: 8+ behavioral features compressed to 2D for visualization while preserving cluster structure."],
+            ["PaCMAP", "Pairwise Controlled Manifold Approximation — dimensionality reduction that compresses 8+ behavioural features to 2D for visualisation while preserving both local cluster structure and global layout. Used here in place of UMAP: same purpose, no numba dependency."],
             ["GMM Confidence", "Gaussian Mixture Model soft probability: how certain the model is that a customer belongs to their assigned segment."],
           ].map(([term, def]) => (
             <div key={term} className="flex gap-2">

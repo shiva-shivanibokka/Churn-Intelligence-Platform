@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import GroqClient from "groq-sdk";
 import type { ChatCompletionMessageParam, ChatCompletionTool } from "groq-sdk/resources/chat/completions";
 import { createClient } from "@supabase/supabase-js";
+import { AGENT_MODEL } from "@/lib/models";
 
 const groq = new GroqClient({ apiKey: process.env.GROQ_API_KEY || "" });
 
@@ -32,8 +33,14 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-key"
 );
 
-const MODEL = "llama-3.3-70b-versatile";
+// Single source of truth, shared with the sidebar that credits it.
+const MODEL = AGENT_MODEL;
 const MAX_ROUNDS = 5;
+
+// Shared by every call in the loop. The forced final answer used to get 1,500
+// while the rounds got 4,096, so the one message that has to carry the whole
+// recommendation had the tightest budget of any of them.
+const ANSWER_MAX_TOKENS = 4096;
 
 // ─── Tool definitions ──────────────────────────────────────────────────────────
 
@@ -193,13 +200,34 @@ const TOOLS: ChatCompletionTool[] = [
 
 // ─── Tool execution ────────────────────────────────────────────────────────────
 
+/**
+ * Turn a Supabase error into something the model is told is a *failure*, not an
+ * absence.
+ *
+ * Nearly every tool below used to destructure only `{ data }`, so an
+ * unreachable database produced `data === null` and the tool answered
+ * "Customer 1234 not found". The agent then told a CSM the customer does not
+ * exist and moved on — a confident wrong answer generated from an outage. The
+ * dashboard pages already learned this lesson during the Supabase pause; the
+ * agent had not.
+ */
+function dbFailure(context: string, error: { message: string } | null) {
+  console.error(`agent tool: ${context} —`, error?.message);
+  return {
+    error: `The customer database could not be reached while running ${context}. ` +
+      `This is a data-source failure, not a statement that the record is missing — ` +
+      `say so rather than concluding anything about the customer. (${error?.message})`,
+  };
+}
+
 async function executeTool(name: string, args: Record<string, unknown>): Promise<unknown> {
   if (name === "get_top_churn_drivers") {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("customers")
       .select("customer_id, top_shap_features, churn_probability, segment")
       .eq("customer_id", String(args.customer_id))
-      .single();
+      .maybeSingle();
+    if (error) return dbFailure("get_top_churn_drivers", error);
     if (!data) return { error: `Customer ${args.customer_id} not found` };
     const shap = (data.top_shap_features as Record<string, number>) ?? {};
     const sorted = Object.entries(shap).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 6);
@@ -216,20 +244,37 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
   }
 
   if (name === "get_segment_benchmark") {
-    const { data } = await supabase
-      .from("customers")
-      .select("churn_probability, uplift_score, risk_tier, customer_type, tenure, satisfaction_score")
-      .eq("segment", String(args.segment));
-    if (!data || data.length === 0) return { error: `Segment ${args.segment} not found` };
-    const avg = (key: string) =>
-      Math.round((data.reduce((s: number, r: Record<string, unknown>) => s + ((r[key] as number) ?? 0), 0) / data.length) * 1000) / 1000;
+    // Aggregated in Postgres, not here.
+    //
+    // This used to SELECT every row of the segment — up to ~13,000 — into the
+    // serverless function and average them in JavaScript, reporting
+    // `data.length` as the segment's customer count. That makes the number the
+    // agent quotes a property of however many rows PostgREST felt like
+    // returning: raise `max-rows` and it is right, lower it and the agent
+    // confidently reports a segment of exactly 1,000 customers. The RPC beside
+    // it, get_all_segment_benchmarks, already computed the true figures, so the
+    // same agent could contradict itself in one conversation.
+    const { data, error } = await supabase.rpc("get_segment_summary");
+    if (error) return { error: `Could not fetch segment data: ${error.message}` };
+
+    const row = ((data ?? []) as Record<string, unknown>[]).find(
+      (s) => String(s.segment) === String(args.segment)
+    );
+    if (!row) {
+      const known = ((data ?? []) as Record<string, unknown>[]).map((s) => s.segment);
+      return { error: `Segment ${args.segment} not found. Known segments: ${known.join(", ")}` };
+    }
+
+    const r3 = (v: unknown) => Math.round(Number(v) * 1000) / 1000;
     return {
-      segment: args.segment,
-      customer_count: data.length,
-      avg_churn_probability: avg("churn_probability"),
-      avg_uplift_score: avg("uplift_score"),
-      pct_high_risk: Math.round(data.filter((r) => r.risk_tier === "High Risk").length / data.length * 1000) / 1000,
-      pct_persuadable: Math.round(data.filter((r) => r.customer_type === "Persuadable").length / data.length * 1000) / 1000,
+      segment: row.segment,
+      customer_count: row.customer_count,
+      churn_rate: r3(row.churn_rate),
+      avg_churn_probability: r3(row.avg_churn_prob),
+      pct_high_risk: r3(row.high_risk_pct),
+      pct_persuadable: r3(row.persuadable_pct),
+      avg_tenure: r3(row.avg_tenure),
+      avg_satisfaction: r3(row.avg_satisfaction),
     };
   }
 
@@ -248,11 +293,12 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
   }
 
   if (name === "lookup_customer_details") {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("customers")
       .select("*")
       .eq("customer_id", String(args.customer_id))
-      .single();
+      .maybeSingle();
+    if (error) return dbFailure("lookup_customer_details", error);
     if (!data) return { error: `Customer ${args.customer_id} not found` };
     return data;
   }
@@ -263,7 +309,12 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       .from("retention_playbook")
       .select("risk_factor_keyword, intervention, message, cost");
     const entries = (rows ?? []) as { risk_factor_keyword: string; intervention: string; message: string; cost: string }[];
-    const match = entries.find((r) => riskFactor.includes(r.risk_factor_keyword) && r.risk_factor_keyword !== "default");
+    // Longest keyword first, so "payment failure" beats a row keyed on "pay".
+    // `find` returns whichever row the database happened to hand back first,
+    // which made the chosen intervention depend on physical row order.
+    const match = entries
+      .filter((r) => r.risk_factor_keyword !== "default" && riskFactor.includes(r.risk_factor_keyword))
+      .sort((a, b) => b.risk_factor_keyword.length - a.risk_factor_keyword.length)[0];
     const fallback = entries.find((r) => r.risk_factor_keyword === "default");
     const result = match ?? fallback;
     return result
@@ -285,12 +336,13 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
   }
 
   if (name === "get_past_interventions") {
-    const { data: actions } = await supabase
+    const { data: actions, error: actionsError } = await supabase
       .from("retention_actions")
       .select("id, intervention_type, channel, timing, generated_at")
       .eq("customer_id", String(args.customer_id))
       .order("generated_at", { ascending: false })
       .limit(10);
+    if (actionsError) return dbFailure("get_past_interventions", actionsError);
     if (!actions || actions.length === 0)
       return { message: `No previous interventions for customer ${args.customer_id}. This would be the first.` };
     const actionIds = (actions as Record<string, unknown>[]).map((a) => a.id as string);
@@ -346,7 +398,8 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       .order("churn_probability", { ascending: false })
       .limit(limit);
     if (args.segment) query = query.eq("segment", String(args.segment));
-    const { data } = await query;
+    const { data, error } = await query;
+    if (error) return dbFailure("get_at_risk_customers", error);
     if (!data || data.length === 0) return { message: "No high-risk customers found for the given filter." };
     return (data as Record<string, unknown>[]).map((c) => ({
       customer_id: c.customer_id,
@@ -398,11 +451,17 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
 
   if (name === "save_retention_action") {
     const customer_id = String(args.customer_id);
-    const { data: customer } = await supabase
+    const { data: customer, error: customerError } = await supabase
       .from("customers")
       .select("segment, churn_probability, uplift_score, net_roi")
       .eq("customer_id", customer_id)
-      .single();
+      .maybeSingle();
+    // Refuse rather than writing an audit row with null segment / churn / ROI,
+    // which afterwards is indistinguishable from a plan made without them.
+    if (customerError) return dbFailure("save_retention_action", customerError);
+    if (!customer) {
+      return { error: `Customer ${customer_id} does not exist, so no retention action was saved.` };
+    }
     const { data, error } = await supabaseAdmin
       .from("retention_actions")
       .insert({
@@ -432,12 +491,13 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
 
   if (name === "get_unactioned_persuadables") {
     const limit = Math.min(Number(args.limit ?? 10), 25);
-    const { data: persuadables } = await supabase
+    const { data: persuadables, error: persuadablesError } = await supabase
       .from("customers")
       .select("customer_id, segment, churn_probability, uplift_score, net_roi")
       .eq("customer_type", "Persuadable")
       .order("net_roi", { ascending: false })
       .limit(100);
+    if (persuadablesError) return dbFailure("get_unactioned_persuadables", persuadablesError);
     if (!persuadables || persuadables.length === 0) return { message: "No persuadable customers found." };
     const ids = (persuadables as Record<string, unknown>[]).map((p) => p.customer_id as string);
     const { data: actioned } = await supabase
@@ -544,6 +604,14 @@ Be concise and actionable. Use tools to fetch real data before answering. If a q
 
 // ─── ReAct loop ────────────────────────────────────────────────────────────────
 
+/**
+ * Strip reasoning scaffolding some models emit around their answer.
+ *
+ * `<think>` blocks are a Qwen/DeepSeek-R1 habit and Llama 3.3 does not produce
+ * them, but this stays as defence for a model swap. `<function=...>` is the
+ * text-shaped tool call the TOOL_CALLING RULES forbid — see runAgentLoop for
+ * why removing it needs care rather than just deleting the text.
+ */
 function stripThinking(text: string): string {
   return text
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
@@ -552,11 +620,11 @@ function stripThinking(text: string): string {
 }
 
 async function runAgentLoop(
-  messages: ChatCompletionMessageParam[],
-  mode: "batch" | "chat"
-): Promise<{ response: string; trace: unknown[] }> {
+  messages: ChatCompletionMessageParam[]
+): Promise<{ response: string; trace: unknown[]; truncated: boolean }> {
   const trace: unknown[] = [];
   const apiMessages: ChatCompletionMessageParam[] = [...messages];
+  let truncated = false;
 
   for (let round = 1; round <= MAX_ROUNDS; round++) {
     const completion = await groq.chat.completions.create({
@@ -564,12 +632,18 @@ async function runAgentLoop(
       messages: apiMessages,
       tools: TOOLS,
       tool_choice: "auto",
-      max_tokens: 4096,
+      max_tokens: ANSWER_MAX_TOKENS,
     });
 
     const msg = completion.choices[0].message;
     const finish = completion.choices[0].finish_reason;
     const cleanContent = stripThinking(msg.content ?? "");
+
+    // An answer cut off at the token ceiling is not an answer. In batch mode it
+    // is also unparseable JSON, which surfaces to the user as the generic
+    // "could not parse agent response" — a message that blames the model for
+    // what is really a budget the caller set. Recorded and reported instead.
+    if (finish === "length") truncated = true;
 
     apiMessages.push({
       role: "assistant",
@@ -577,8 +651,16 @@ async function runAgentLoop(
       tool_calls: msg.tool_calls ?? undefined,
     } as ChatCompletionMessageParam);
 
-    if (!msg.tool_calls || finish === "stop") {
-      return { response: cleanContent, trace };
+    // Finish only when there is nothing left to run.
+    //
+    // This used to also return on `finish_reason === "stop"`, as an OR. When a
+    // model returns "stop" *alongside* tool calls — which happens — the loop
+    // returned immediately, threw the tool calls away, and handed back whatever
+    // text was in that message. That text is usually empty when the model is
+    // calling tools, so the user got a blank reply and the trace showed the
+    // agent had done no work.
+    if (!msg.tool_calls || msg.tool_calls.length === 0) {
+      return { response: cleanContent, trace, truncated };
     }
 
     for (const tc of msg.tool_calls) {
@@ -596,19 +678,87 @@ async function runAgentLoop(
     }
   }
 
-  // Max rounds — force final answer
+  // Max rounds — force a final answer, with no tools offered so it cannot ask
+  // for another round it will not get.
   const final = await groq.chat.completions.create({
     model: MODEL,
     messages: [...apiMessages, { role: "user", content: "Summarise findings and give a final recommendation now." }],
-    max_tokens: 1500,
+    max_tokens: ANSWER_MAX_TOKENS,
   });
-  return { response: stripThinking(final.choices[0].message.content ?? ""), trace };
+  if (final.choices[0].finish_reason === "length") truncated = true;
+  return { response: stripThinking(final.choices[0].message.content ?? ""), trace, truncated };
+}
+
+// ─── Abuse limits ──────────────────────────────────────────────────────────────
+
+/**
+ * This route is public and unauthenticated, on purpose — the demo is meant to
+ * be usable by anyone who opens the dashboard. But every request spends Groq
+ * free-tier tokens (100k/day for the whole project) and can write rows to
+ * `retention_actions`, so "anyone" also means "anyone with a for-loop": one
+ * script can exhaust the day's quota in a couple of minutes and leave the
+ * demo dead for everybody else, with a polluted audit trail behind it.
+ *
+ * A per-IP bucket held in module scope is a real mitigation and an imperfect
+ * one, and it is worth being precise about which. Serverless instances are not
+ * shared, so an attacker spread across enough cold starts gets more than the
+ * quota below suggests. It stops casual hammering and the accidental infinite
+ * retry loop, which is most of what actually happens; it is not a defence
+ * against someone who wants the quota gone. The real fix is a shared store
+ * (Vercel KV, Upstash) and that is a dependency this project does not need yet.
+ */
+const RATE_LIMIT = { windowMs: 10 * 60_000, maxRequests: 15 };
+const hits = new Map<string, number[]>();
+
+function rateLimited(ip: string): boolean {
+  const now = Date.now();
+  const cutoff = now - RATE_LIMIT.windowMs;
+  const recent = (hits.get(ip) ?? []).filter((t) => t > cutoff);
+  recent.push(now);
+  hits.set(ip, recent);
+
+  // Keep the map from growing without bound across a long-lived instance.
+  if (hits.size > 5000) {
+    for (const [key, times] of hits) {
+      if (times.every((t) => t <= cutoff)) hits.delete(key);
+    }
+  }
+  return recent.length > RATE_LIMIT.maxRequests;
+}
+
+/** Longest conversation the client may replay back at us. */
+const MAX_HISTORY_MESSAGES = 12;
+
+/**
+ * The client sends `history` and it is passed straight to the model, so without
+ * this a caller can inject their own `system` message and rewrite the agent's
+ * instructions — including the rule that only lets it save when asked. Only the
+ * two roles a transcript legitimately contains are kept, and only the tail of
+ * it, so a long session cannot be replayed back as an unbounded token bill.
+ */
+function sanitiseHistory(history: ChatCompletionMessageParam[] | undefined) {
+  return (history ?? [])
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .slice(-MAX_HISTORY_MESSAGES);
 }
 
 // ─── Route handler ─────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   try {
+    // Vercel sets x-forwarded-for; the first entry is the client.
+    const ip = (req.headers.get("x-forwarded-for") ?? "unknown").split(",")[0].trim();
+    if (rateLimited(ip)) {
+      return NextResponse.json(
+        {
+          error: `Rate limit reached — ${RATE_LIMIT.maxRequests} agent requests per ` +
+            `${RATE_LIMIT.windowMs / 60_000} minutes. This demo runs on Groq's free tier ` +
+            "and the limit is what keeps it available for everyone.",
+        },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json();
     const { mode, customer, message, history } = body as {
       mode: "batch" | "chat";
@@ -634,14 +784,14 @@ export async function POST(req: NextRequest) {
     } else if (mode === "chat" && message) {
       messages = [
         { role: "system", content: buildSystemChat(cfg) },
-        ...(history ?? []),
+        ...sanitiseHistory(history),
         { role: "user", content: message },
       ];
     } else {
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const { response, trace } = await runAgentLoop(messages, mode);
+    const { response, trace, truncated } = await runAgentLoop(messages);
 
     if (mode === "batch") {
       let raw = response;
@@ -692,13 +842,22 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        return NextResponse.json({ action, saved_id: savedId, save_error: saveError });
+        return NextResponse.json({ action, saved_id: savedId, save_error: saveError, truncated });
       } catch {
-        return NextResponse.json({ action: { error: "Could not parse agent response", raw: raw.slice(0, 400), trace } });
+        return NextResponse.json({
+          action: {
+            error: truncated
+              ? `The agent's reply hit the ${ANSWER_MAX_TOKENS}-token ceiling and stopped mid-JSON, so there is no plan to show. This is a budget limit, not a model failure.`
+              : "Could not parse agent response",
+            raw: raw.slice(0, 400),
+            trace,
+          },
+          truncated,
+        });
       }
     }
 
-    return NextResponse.json({ response, trace });
+    return NextResponse.json({ response, trace, truncated });
   } catch (err: unknown) {
     console.error("Agent error:", err);
     return NextResponse.json({ error: String(err) }, { status: 500 });

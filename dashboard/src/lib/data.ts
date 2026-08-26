@@ -169,23 +169,52 @@ export async function getPersuadablesList(limit = 100): Promise<PersuadableCusto
 
 // ── Retention / audit ─────────────────────────────────────────────────────────
 export async function getRetentionActions(limit = 200): Promise<RetentionAction[]> {
-  const [{ data: actions, error }, { data: feedback }] = await Promise.all([
-    supabase.from("retention_actions").select("*").order("generated_at", { ascending: false }).limit(limit),
-    supabase.from("intervention_feedback").select("retention_action_id, outcome"),
-  ]);
+  const { data: actions, error } = await supabase
+    .from("retention_actions")
+    .select("*")
+    .order("generated_at", { ascending: false })
+    .limit(limit);
   if (error) throw error;
+  if (!actions?.length) return [];
+
+  // Fetch feedback only for the actions being shown, rather than the whole
+  // table. Two reasons: an unfiltered select grows without bound as feedback
+  // accumulates and eventually meets PostgREST's row cap, at which point the
+  // map silently loses entries and outcomes start rendering as "pending"; and
+  // this page only ever needs the rows it is about to join against.
+  const ids = actions.map((a) => a.id as string);
+  const { data: feedback, error: feedbackError } = await supabase
+    .from("intervention_feedback")
+    .select("retention_action_id, outcome")
+    .in("retention_action_id", ids);
+
+  // This error used to be destructured away. An unreachable feedback table then
+  // looked exactly like "nobody has recorded an outcome yet" — every action
+  // rendering as pending, no warning anywhere. That is the same collapse of
+  // "unreachable" into "empty" that made the whole dashboard report zeroes
+  // during the Supabase pause, so it throws to error.tsx like everything else.
+  if (feedbackError) throw feedbackError;
+
   const fbMap: Record<string, string> = {};
   for (const f of feedback ?? []) fbMap[f.retention_action_id] = f.outcome;
-  return (actions ?? []).map((a) => ({ ...a, outcome: fbMap[a.id] ?? null })) as RetentionAction[];
+  return actions.map((a) => ({ ...a, outcome: fbMap[a.id] ?? null })) as RetentionAction[];
 }
 
 export async function saveFeedback(retentionActionId: string, customerId: string, outcome: string) {
-  const { error } = await supabase.from("intervention_feedback").insert({
-    id: crypto.randomUUID(),
-    retention_action_id: retentionActionId,
-    customer_id: customerId,
-    outcome,
-  });
+  // Upsert, not insert. A CSM who marks an action "retained" and then corrects
+  // it to "churned" was leaving two rows behind, and the map in
+  // getRetentionActions keys on retention_action_id — so which correction won
+  // depended on the order Postgres returned the rows in. The outcome of an
+  // intervention is one fact, so it gets one row.
+  const { error } = await supabase.from("intervention_feedback").upsert(
+    {
+      id: crypto.randomUUID(),
+      retention_action_id: retentionActionId,
+      customer_id: customerId,
+      outcome,
+    },
+    { onConflict: "retention_action_id" }
+  );
   if (error) throw error;
 }
 

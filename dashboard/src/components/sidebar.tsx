@@ -9,6 +9,7 @@ import {
   Zap,
   LineChart,
 } from "lucide-react";
+import { AGENT_MODEL_LABEL, EMBEDDING_LABEL } from "@/lib/models";
 
 const NAV = [
   { href: "/", label: "Segmentation", icon: BarChart3 },
@@ -82,8 +83,9 @@ export function Sidebar() {
       {/* Footer */}
       <div className="px-5 py-4 border-t border-white/15">
         <p className="text-[11px] text-white/35 leading-snug">
-          CatBoost · CausalML · PaCMAP<br />
-          Groq Qwen QwQ-32B
+          CatBoost · CausalML · {EMBEDDING_LABEL}<br />
+          {AGENT_MODEL_LABEL}<br />
+          <span className="text-white/50">Built by Shivani Bokka</span>
         </p>
       </div>
     </aside>
