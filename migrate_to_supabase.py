@@ -9,7 +9,9 @@ Usage:
 
 Requires DATABASE_URL in environment or .env file.
 """
-import os, json, logging
+import json
+import logging
+import os
 from pathlib import Path
 
 # Load .env file manually — no python-dotenv dependency needed
@@ -114,9 +116,12 @@ def load_data():
     # Parse TopSHAPFeatures JSON string
     if "top_shap_features" in df.columns:
         def parse_shap(v):
+            """Tolerate a malformed explanation, not every possible failure."""
             if isinstance(v, str):
-                try: return json.loads(v)
-                except: return {}
+                try:
+                    return json.loads(v)
+                except (TypeError, ValueError):
+                    return {}
             return v if isinstance(v, dict) else {}
         df["top_shap_features"] = df["top_shap_features"].apply(parse_shap)
 

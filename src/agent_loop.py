@@ -17,7 +17,6 @@ Architecture mirrors what Salesforce Einstein Copilot and HubSpot AI do:
 import json
 import logging
 import time
-from typing import Optional
 
 from groq import Groq, RateLimitError
 
@@ -243,7 +242,7 @@ def generate_retention_action_agentic(
             raw = raw.split("```")[1].split("```")[0].strip()
         action = json.loads(raw)
     except json.JSONDecodeError:
-        action = {"error": f"Could not parse JSON from agent response.", "raw_response": raw[:500]}
+        action = {"error": "Could not parse JSON from agent response.", "raw_response": raw[:500]}
 
     action["customer_id"] = customer_id
     action["segment"] = customer_row.get("Segment", "Unknown")

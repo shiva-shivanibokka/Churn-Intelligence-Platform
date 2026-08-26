@@ -342,17 +342,17 @@ def execute_tool(name: str, args: dict, df, playbook: dict) -> dict:
     try:
         if name == "lookup_customer_details":
             return lookup_customer_details(df, args["customer_id"])
-        elif name == "get_segment_benchmark":
+        if name == "get_segment_benchmark":
             return get_segment_benchmark(df, args["segment"])
-        elif name == "get_top_churn_drivers":
+        if name == "get_top_churn_drivers":
             return get_top_churn_drivers(df, args["customer_id"])
-        elif name == "calculate_intervention_roi":
+        if name == "calculate_intervention_roi":
             return calculate_intervention_roi(
                 args["uplift_score"], args["clv"], args["intervention_cost"]
             )
-        elif name == "search_retention_playbook":
+        if name == "search_retention_playbook":
             return search_retention_playbook(playbook, args["risk_factor"])
-        elif name == "list_customers":
+        if name == "list_customers":
             return list_customers(
                 df,
                 segment=args.get("segment"),
@@ -360,8 +360,7 @@ def execute_tool(name: str, args: dict, df, playbook: dict) -> dict:
                 customer_type=args.get("customer_type"),
                 top_n=args.get("top_n", 10),
             )
-        else:
-            return {"error": f"Unknown tool: {name}"}
+        return {"error": f"Unknown tool: {name}"}
     except KeyError as e:
         return {"error": f"Missing required argument for tool '{name}': {e}"}
     except Exception as e:

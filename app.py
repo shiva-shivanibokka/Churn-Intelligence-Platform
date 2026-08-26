@@ -12,19 +12,16 @@ Five pages:
   5. Audit & Analytics      — Audit trail, outcome tracking, feedback loop
 """
 
+import json
 import os
 import sys
-import json
 import uuid
 import warnings
-import joblib
 
-import streamlit as st
+import joblib
 import pandas as pd
-import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import streamlit as st
 
 warnings.filterwarnings("ignore")
 
@@ -535,7 +532,7 @@ def page_segmentation(df):
 
     # ── KPIs ────────────────────────────────────────────────────────────────
     col1, col2, col3, col4, col5 = st.columns(5)
-    for i, (seg, color) in enumerate(SEGMENT_COLORS.items()):
+    for i, seg in enumerate(SEGMENT_COLORS):
         count = (df["Segment"] == seg).sum()
         churn_rate = df[df["Segment"] == seg]["Churn"].mean() if count > 0 else 0
         [col1, col2, col3, col4, col5][i].metric(
@@ -1249,7 +1246,7 @@ def _render_batch_tab(df, api_key, avg_clv, top_n, agentic_mode, playbook):
 def _render_chat_tab(df, api_key, playbook):
     """AI Customer Assistant tab — multi-turn conversational agent."""
     import database as db
-    from agent_loop import run_agentic_loop, SYSTEM_PROMPT_CHAT
+    from agent_loop import SYSTEM_PROMPT_CHAT, run_agentic_loop
 
     st.subheader("AI Customer Assistant")
     st.caption(
@@ -1472,7 +1469,6 @@ and CSMs can mark outcomes (Retained / Churned / Pending) directly on each actio
     total = summary.get("total_actions", 0)
     retained = outcomes.get("retained", 0)
     churned = outcomes.get("churned", 0)
-    pending = outcomes.get("pending", 0) + (total - retained - churned - outcomes.get("pending", 0))
 
     st.subheader("Campaign Summary")
     m1, m2, m3, m4 = st.columns([1, 1, 1, 1], gap="medium")

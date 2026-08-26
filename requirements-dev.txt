@@ -5,3 +5,7 @@ pytest==9.0.3
 pytest-cov==7.1.0
 httpx==0.28.1
 pip-audit>=2.7.0
+
+# Pinned, not floated. An unpinned linter installs a different version on every
+# CI run and fails builds on commits that changed none of the flagged code.
+ruff==0.16.3

@@ -25,10 +25,9 @@ the customer profile before generating the recommendation.
 
 import json
 import logging
-import os
 import time
+
 from groq import Groq, RateLimitError
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +212,7 @@ def generate_batch_retention_actions(
     segment_profiles,
     api_key: str,
     top_n: int = 20,
-    customer_types: Optional[list] = None,
+    customer_types: list | None = None,
     avg_clv: float = 500.0,
 ) -> list[dict]:
     """
@@ -224,7 +223,6 @@ def generate_batch_retention_actions(
     pattern at Salesforce and Netflix where the decision layer only
     passes actionable customers downstream to the intervention system.
     """
-    import pandas as pd
 
     if customer_types is None:
         customer_types = ["Persuadable"]
@@ -288,7 +286,7 @@ def format_action_for_display(action: dict) -> str:
         f"**Why they're at risk:** {action.get('primary_risk_reason', 'N/A')}",
         f"**Will they respond?** {action.get('customer_receptivity', 'N/A')}",
         "",
-        f"**Suggested Message:**",
+        "**Suggested Message:**",
         f"> {action.get('message_framing', 'N/A')}",
         "",
         f"**Expected Outcome:** {action.get('expected_outcome', 'N/A')}",

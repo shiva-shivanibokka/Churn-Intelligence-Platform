@@ -1,0 +1,38 @@
+# Pinned in requirements-dev.txt as well as configured here.
+#
+# Both halves matter. An unpinned lint tool installs whatever released most
+# recently on each CI run and inherits its defaults, so a commit that touches
+# nothing can turn a green build red — and naming the rules means the selection
+# is a decision rather than whatever that version happened to enable.
+
+line-length = 110
+target-version = "py312"
+
+[lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes — unused imports and names
+    "I",    # import ordering
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "S110", # try-except-pass
+    "S112", # try-except-continue
+    "C4",   # comprehensions
+    "RET",  # return simplifications
+]
+ignore = [
+    "E501",   # line length is handled by the formatter, not as an error
+    "B008",   # FastAPI's Depends() in a default argument is the documented idiom
+    "C408",   # dict(a=1) reads better than a literal for keyword-shaped params
+    "RET504", # a named result before `return` often is the documentation
+]
+
+[lint.per-file-ignores]
+# The dataset modules and the pipeline add src/ to sys.path before importing
+# their siblings, so those imports cannot be at the top of the file.
+"src/pipeline.py" = ["E402"]
+"api/serve.py" = ["E402"]
+"app.py" = ["E402"]
+"tests/*" = ["E402"]
+"migrate_to_supabase.py" = ["E402"]
+"restore_supabase.py" = ["E402"]

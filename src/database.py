@@ -19,16 +19,15 @@ import logging
 import os
 import uuid
 from contextlib import contextmanager
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-_DATABASE_URL: Optional[str] = None
+_DATABASE_URL: str | None = None
 _db_available: bool = False
 
 # ─── Initialisation ───────────────────────────────────────────────────────────
 
-def initialize(database_url: Optional[str] = None) -> bool:
+def initialize(database_url: str | None = None) -> bool:
     """
     Connect to PostgreSQL and create schema if tables don't exist.
     Call once at app startup. Returns True if connection succeeded.
@@ -47,7 +46,7 @@ def initialize(database_url: Optional[str] = None) -> bool:
     _DATABASE_URL = url
 
     try:
-        import psycopg2  # imported here so missing package doesn't crash the app
+        import psycopg2  # noqa: F401 — presence probe: absence must degrade, not crash
         with _get_conn() as conn:
             _create_schema(conn)
         _db_available = True
@@ -150,12 +149,31 @@ def _create_schema(conn):
             CREATE INDEX IF NOT EXISTS idx_actions_customer ON retention_actions(customer_id);
             CREATE INDEX IF NOT EXISTS idx_actions_generated ON retention_actions(generated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_feedback_action ON intervention_feedback(retention_action_id);
+
+            -- One outcome per action.
+            --
+            -- Without this, marking an intervention "retained" and then
+            -- correcting it to "churned" left two rows, and every reader keys
+            -- on retention_action_id — so which of the two won depended on the
+            -- order Postgres happened to return them in. The dashboard now
+            -- upserts on this constraint, which needs the constraint to exist.
+            --
+            -- Existing duplicates have to go first or the index cannot be
+            -- built. The most recent row is the one kept: it is the correction.
+            DELETE FROM intervention_feedback a
+             USING intervention_feedback b
+             WHERE a.retention_action_id = b.retention_action_id
+               AND (a.logged_at < b.logged_at
+                    OR (a.logged_at = b.logged_at AND a.id < b.id));
+
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_feedback_action
+                ON intervention_feedback(retention_action_id);
         """)
 
 
 # ─── Conversation Management ──────────────────────────────────────────────────
 
-def create_conversation(session_id: str) -> Optional[str]:
+def create_conversation(session_id: str) -> str | None:
     if not _db_available:
         return None
     conv_id = str(uuid.uuid4())
@@ -176,8 +194,8 @@ def save_message(
     conversation_id: str,
     role: str,
     content: str,
-    tool_calls: Optional[list] = None,
-) -> Optional[str]:
+    tool_calls: list | None = None,
+) -> str | None:
     if not _db_available or not conversation_id:
         return None
     msg_id = str(uuid.uuid4())
@@ -232,7 +250,7 @@ def load_conversation_messages(session_id: str) -> list:
 
 # ─── Retention Action Audit Trail ─────────────────────────────────────────────
 
-def save_retention_action(action: dict, agentic_mode: bool = False) -> Optional[str]:
+def save_retention_action(action: dict, agentic_mode: bool = False) -> str | None:
     """Log every generated retention action to the audit trail."""
     if not _db_available:
         return None
@@ -266,7 +284,7 @@ def save_retention_action(action: dict, agentic_mode: bool = False) -> Optional[
         return None
 
 
-def save_feedback(retention_action_id: str, customer_id: str, outcome: str) -> Optional[str]:
+def save_feedback(retention_action_id: str, customer_id: str, outcome: str) -> str | None:
     if not _db_available:
         return None
     fb_id = str(uuid.uuid4())
@@ -274,7 +292,12 @@ def save_feedback(retention_action_id: str, customer_id: str, outcome: str) -> O
         with _get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO intervention_feedback (id, retention_action_id, customer_id, outcome) VALUES (%s,%s,%s,%s)",
+                    """INSERT INTO intervention_feedback
+                           (id, retention_action_id, customer_id, outcome)
+                       VALUES (%s, %s, %s, %s)
+                       ON CONFLICT (retention_action_id) DO UPDATE
+                           SET outcome = EXCLUDED.outcome,
+                               logged_at = NOW()""",
                     (fb_id, retention_action_id, customer_id, outcome),
                 )
         return fb_id

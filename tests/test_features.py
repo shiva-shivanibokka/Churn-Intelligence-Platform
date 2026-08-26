@@ -1,19 +1,19 @@
 """Tests for feature engineering pipeline."""
 
-import sys
 import os
-import pytest
-import pandas as pd
+import sys
+
 import numpy as np
+import pandas as pd
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from features import (
-    impute_missing,
     encode_categoricals,
     engineer_features,
+    impute_missing,
     validate_schema,
-    EXPECTED_COLUMNS,
 )
 
 
