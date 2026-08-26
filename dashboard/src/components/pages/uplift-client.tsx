@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import dynamic from "next/dynamic";
-import { UpliftKpis, CustomerTypeSummary, RoiBySegment, TopPersuadable, UpliftScatterPoint } from "@/lib/data";
+import { UpliftKpis, CustomerTypeSummary, RoiBySegment, TopPersuadable, UpliftScatterColumns } from "@/lib/data";
 import { PageTitle, SectionHeading } from "@/components/ui/section-heading";
 import { MetricCard } from "@/components/ui/metric-card";
 import { ChartCard } from "@/components/ui/chart-card";
@@ -29,23 +29,24 @@ interface Props {
   typeSummary: CustomerTypeSummary[];
   roiBySeg: RoiBySegment[];
   topPersuadables: TopPersuadable[];
-  scatter: UpliftScatterPoint[];
+  scatter: UpliftScatterColumns;
 }
 
 export function UpliftClient({ kpis, typeSummary, roiBySeg, topPersuadables, scatter }: Props) {
   const byType = useMemo(() => {
-    const types = [...new Set(scatter.map((c) => c.customer_type))];
-    return types.map((t) => {
-      const rows = scatter.filter((c) => c.customer_type === t);
+    return scatter.types.map((name, typeIdx) => {
+      const rows: number[] = [];
+      for (let i = 0; i < scatter.type.length; i++) {
+        if (scatter.type[i] === typeIdx) rows.push(i);
+      }
       return {
         type: "scatter" as const,
         mode: "markers" as const,
-        name: t,
-        x: rows.map((c) => c.churn_probability),
-        y: rows.map((c) => c.uplift_score),
-        text: rows.map((c) => `${c.customer_id}<br>Segment: ${c.segment}<br>ROI: $${c.net_roi.toFixed(0)}`),
-        marker: { size: 9, color: TYPE_COLORS[t] ?? "#6B7280", opacity: 0.75, line: { width: 1, color: "white" } },
-        hovertemplate: "%{text}<extra>%{fullData.name}</extra>",
+        name,
+        x: rows.map((i) => scatter.prob[i]),
+        y: rows.map((i) => scatter.uplift[i]),
+        marker: { size: 5, opacity: 0.6, color: TYPE_COLORS[name] ?? "#6B7280" },
+        hovertemplate: "Churn %{x:.1%}<br>Uplift %{y:.2%}<extra>" + name + "</extra>",
       };
     });
   }, [scatter]);

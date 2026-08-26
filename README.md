@@ -618,15 +618,25 @@ each wave gating the next, measured at **3.7 s** before the first byte. Only the
 segment *names* actually depend on the first query, so the four unfiltered ones
 no longer wait for it.
 
-The segmentation scatter sent 10,000 customers as 10,000 labelled objects, and a
-row spent most of its bytes repeating the key names — `customer_id`,
+The scatter plots sent their customers as one labelled object each, and a row
+spent most of its bytes repeating the key names — `customer_id`,
 `churn_probability`, `uplift_score` and the rest, once per point. That is roughly
 a megabyte of JSON keys in a 2.3 MB page, all of it parsed on the main thread
 before React can hydrate, which is exactly the window where a page is painted but
-does not answer clicks. Sending columns instead says each name once, segment
-labels are factorised into a codebook, coordinates are rounded to the precision a
-pixel can show, and `risk_tier` is derived on the client from the probability it
-was always a function of. **2.29 MB → 475 KB**, same 10,000 points.
+does not answer clicks. Sending columns instead says each name once; segment and
+customer-type labels are factorised into codebooks; coordinates are rounded to
+the precision a pixel can show; and `risk_tier` is derived on the client from the
+probability it was always a function of.
+
+| Page | Before | After |
+|---|---|---|
+| Segmentation (`/`) | 2.29 MB, 1.61 s | **436 KB, 0.52 s** |
+| Uplift (`/uplift`) | 2.33 MB | **290 KB** |
+| Churn (`/churn`) | 3.67 s | **0.36 s** |
+
+Same 10,000 points on the segmentation scatter. The uplift page also stopped
+sending 2,000 rows for a "campaign priority list" nobody scrolls past the first
+screen of — it sends 250.
 
 ### Keeping the database awake
 

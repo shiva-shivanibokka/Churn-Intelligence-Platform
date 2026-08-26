@@ -63,12 +63,28 @@ OUT_DIR = ROOT / "dashboard" / "public" / "agent-runs"
 
 # The route's own configuration, restated here so a recording is made with the
 # same model and round limit the live agent uses.
-# The provider and model these runs were recorded with. Groq retired the model
-# previously named here, which is exactly the drift a recording should not
-# preserve — the live agent now lets a visitor pick from a list fetched off
-# their own provider, so this only fixes what the *recordings* used.
-PROVIDER = "groq"
-MODEL = "openai/gpt-oss-120b"
+# Which provider and model the recordings are made with, and where each
+# provider's key lives in .env.
+#
+# Groq is the default because its free tier costs nothing, which matters for a
+# script that will be re-run whenever the recordings need refreshing. Any of the
+# providers the dashboard supports works — they share one OpenAI-compatible code
+# path — so `--provider anthropic` records with Claude instead.
+#
+# The model previously named here was retired by Groq mid-project, which is
+# exactly the drift a recording should not silently preserve; `--model` overrides
+# it and the dashboard itself no longer hardcodes one at all.
+PROVIDER_KEYS = {
+    "groq": ("GROQ_API_KEY", "openai/gpt-oss-120b"),
+    "openai": ("OPENAI_API_KEY", "gpt-4o-mini"),
+    "anthropic": ("ANTHROPIC_API_KEY", "claude-sonnet-4-5"),
+    "gemini": ("GEMINI_API_KEY", "gemini-2.0-flash"),
+    "openrouter": ("OPENROUTER_API_KEY", "openai/gpt-4o-mini"),
+    "cerebras": ("CEREBRAS_API_KEY", "llama-3.3-70b"),
+}
+
+# The route's own limits, restated so a recording is made under the same ones
+# the live agent uses.
 MAX_ROUNDS = 5
 ANSWER_MAX_TOKENS = 4096
 
@@ -88,8 +104,8 @@ CHAT_QUESTIONS = [
 ]
 
 
-def load_env() -> str:
-    """Read GROQ_API_KEY from .env without importing the whole config module."""
+def load_env(var_name: str) -> str:
+    """Read one provider's key from .env without importing the whole config module."""
     env_path = ROOT / ".env"
     if env_path.exists():
         for line in env_path.read_text(encoding="utf-8").splitlines():
@@ -98,10 +114,10 @@ def load_env() -> str:
                 name, _, value = line.partition("=")
                 os.environ.setdefault(name.strip(), value.strip())
 
-    key = os.environ.get("GROQ_API_KEY", "").strip()
+    key = os.environ.get(var_name, "").strip()
     if not key:
         raise SystemExit(
-            "GROQ_API_KEY is not set. Add it to .env — it is used once, here, to "
+            f"{var_name} is not set. Add it to .env — it is used once, here, to "
             "record the runs, and never ships with the deployment."
         )
     return key
@@ -116,11 +132,23 @@ def make_scrubber(secret: str):
     `input_tokens` out of a benchmark because the field name contained "token",
     which corrupted the run it was supposed to protect.
     """
-    pattern = re.compile("|".join([re.escape(secret), r"gsk_[A-Za-z0-9]{20,}"]))
+    pattern = re.compile(
+        "|".join(
+            [
+                re.escape(secret),
+                r"gsk_[A-Za-z0-9]{20,}",
+                r"csk-[A-Za-z0-9]{20,}",
+                r"sk-ant-[A-Za-z0-9_-]{20,}",
+                r"sk-or-[A-Za-z0-9_-]{20,}",
+                r"sk-[A-Za-z0-9_-]{20,}",
+                r"AIza[A-Za-z0-9_-]{20,}",
+            ]
+        )
+    )
 
     def scrub(obj):
         if isinstance(obj, str):
-            return pattern.sub("gsk_***", obj)
+            return pattern.sub("***redacted***", obj)
         if isinstance(obj, dict):
             return {k: scrub(v) for k, v in obj.items()}
         if isinstance(obj, list):
@@ -153,7 +181,9 @@ def fetch_persuadables(limit: int = 3) -> list[dict]:
     ]
 
 
-def post_agent(base_url: str, key: str, payload: dict, attempt: int = 1) -> dict:
+def post_agent(
+    base_url: str, key: str, payload: dict, provider: str, model: str, attempt: int = 1
+) -> dict:
     """
     One call to the real route, with the key in the header the UI uses.
 
@@ -168,7 +198,7 @@ def post_agent(base_url: str, key: str, payload: dict, attempt: int = 1) -> dict
 
     # The provider is named in the body; the base URL is resolved server-side
     # from the fixed provider map, never sent from a caller.
-    payload = {**payload, "provider": PROVIDER, "model": MODEL}
+    payload = {**payload, "provider": provider, "model": model}
     request = urllib.request.Request(
         f"{base_url.rstrip('/')}/api/agent",
         data=json.dumps(payload).encode("utf-8"),
@@ -184,7 +214,7 @@ def post_agent(base_url: str, key: str, payload: dict, attempt: int = 1) -> dict
             wait = RATE_LIMIT_BACKOFF_SECONDS * attempt
             print(f"      rate limited — waiting {wait}s (attempt {attempt})", flush=True)
             time.sleep(wait)
-            return post_agent(base_url, key, payload, attempt + 1)
+            return post_agent(base_url, key, payload, provider, model, attempt + 1)
         raise SystemExit(
             f"The agent route returned {exc.code}. Body: {body[:400]}\n"
             "A 401 here means the key was rejected; a 429 means the quota is spent."
@@ -204,31 +234,41 @@ def main() -> int:
         default="http://localhost:3000",
         help="where the dashboard is running (default: %(default)s)",
     )
+    parser.add_argument(
+        "--provider",
+        default="groq",
+        choices=sorted(PROVIDER_KEYS),
+        help="which provider to record with (default: %(default)s — its free tier costs nothing)",
+    )
+    parser.add_argument("--model", default=None, help="override the provider's default model")
     args = parser.parse_args()
 
     if args.check:
         return check()
 
-    key = load_env()
+    provider = args.provider
+    var_name, default_model = PROVIDER_KEYS[provider]
+    model = args.model or default_model
+    key = load_env(var_name)
     scrub = make_scrubber(key)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     customers = fetch_persuadables()
     print(f"Recording against {len(customers)} real Persuadables and {len(CHAT_QUESTIONS)} questions.")
-    print(f"Driving {args.base_url}/api/agent — the same route the live dashboard calls.\n")
+    print(f"Driving {args.base_url}/api/agent with {provider} / {model}.\n")
 
     index = []
 
     for i, customer in enumerate(customers, 1):
         print(f"  [batch {i}/{len(customers)}] {customer['customer_id']} …", flush=True)
         started = time.time()
-        data = post_agent(args.base_url, key, {"mode": "batch", "customer": customer})
+        data = post_agent(args.base_url, key, {"mode": "batch", "customer": customer}, provider, model)
         record = scrub(
             {
                 "id": f"batch-{customer['customer_id']}",
                 "mode": "batch",
-                "provider": PROVIDER,
-                "model": MODEL,
+                "provider": provider,
+                "model": model,
                 "max_rounds": MAX_ROUNDS,
                 "answer_max_tokens": ANSWER_MAX_TOKENS,
                 "customer": customer,
@@ -245,13 +285,15 @@ def main() -> int:
     for i, question in enumerate(CHAT_QUESTIONS, 1):
         print(f"  [chat {i}/{len(CHAT_QUESTIONS)}] {question[:50]}…", flush=True)
         started = time.time()
-        data = post_agent(args.base_url, key, {"mode": "chat", "message": question, "history": []})
+        data = post_agent(
+            args.base_url, key, {"mode": "chat", "message": question, "history": []}, provider, model
+        )
         record = scrub(
             {
                 "id": f"chat-{i}",
                 "mode": "chat",
-                "provider": PROVIDER,
-                "model": MODEL,
+                "provider": provider,
+                "model": model,
                 "max_rounds": MAX_ROUNDS,
                 "answer_max_tokens": ANSWER_MAX_TOKENS,
                 "question": question,
@@ -266,7 +308,7 @@ def main() -> int:
         time.sleep(PAUSE_BETWEEN_RUNS_SECONDS)
 
     (OUT_DIR / "index.json").write_text(
-        json.dumps({"provider": PROVIDER, "model": MODEL, "runs": index}, indent=2),
+        json.dumps({"provider": provider, "model": model, "runs": index}, indent=2),
         encoding="utf-8",
     )
     print(f"\nWrote {len(index)} recordings to {OUT_DIR.relative_to(ROOT)}")
@@ -314,7 +356,10 @@ def check() -> int:
             continue
 
         raw = path.read_text(encoding="utf-8")
-        if re.search(r"gsk_[A-Za-z0-9]{20,}", raw):
+        if re.search(
+            r"gsk_[A-Za-z0-9]{20,}|csk-[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{20,}",
+            raw,
+        ):
             problems.append(f"{entry['id']}: contains an unredacted API key")
 
         record = json.loads(raw)

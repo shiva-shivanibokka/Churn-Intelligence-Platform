@@ -82,50 +82,47 @@ function trim(value: number | null | undefined, dp = 4): number {
 }
 
 // ── Lightweight scatter data (no full table scan) ────────────────────────────
-export type UpliftScatterPoint = {
-  customer_id: string;
-  customer_type: string;
-  churn_probability: number;
-  uplift_score: number;
-  net_roi: number;
-  segment: string;
+/**
+ * The uplift quadrant scatter, as columns.
+ *
+ * Same reasoning as `UmapColumns`: sent row-wise, most of the bytes were the
+ * JSON key names repeated once per customer. Customer type is factorised into a
+ * codebook because the scatter groups by it, and `customer_id` is dropped
+ * entirely — the chart never displayed it.
+ */
+export type UpliftScatterColumns = {
+  /** Customer-type names, indexed by `type`. */
+  types: string[];
+  type: number[];
+  prob: number[];
+  uplift: number[];
 };
 
-export async function getUpliftScatterData(): Promise<UpliftScatterPoint[]> {
+export async function getUpliftScatterData(): Promise<UpliftScatterColumns> {
   const { data, error } = await supabase
     .from("customers")
-    .select("customer_id, customer_type, churn_probability, uplift_score, net_roi, segment")
+    .select("customer_type, churn_probability, uplift_score")
     .limit(5000);
   if (error) throw error;
-  return (data ?? []).map((c) => ({
-    customer_id: c.customer_id,
-    customer_type: c.customer_type,
-    segment: c.segment,
-    churn_probability: trim(c.churn_probability),
-    uplift_score: trim(c.uplift_score),
-    net_roi: trim(c.net_roi, 2),
-  })) as UpliftScatterPoint[];
+
+  const types: string[] = [];
+  const typeIndex = new Map<string, number>();
+  const columns: UpliftScatterColumns = { types, type: [], prob: [], uplift: [] };
+
+  for (const r of data ?? []) {
+    let idx = typeIndex.get(r.customer_type);
+    if (idx === undefined) {
+      idx = types.push(r.customer_type) - 1;
+      typeIndex.set(r.customer_type, idx);
+    }
+    columns.type.push(idx);
+    columns.prob.push(trim(r.churn_probability));
+    columns.uplift.push(trim(r.uplift_score));
+  }
+
+  return columns;
 }
 
-/**
- * The behavioural-space scatter, as columns.
- *
- * Sent column-wise rather than as an array of row objects, because the row
- * shape spends most of its bytes saying the same thing ten thousand times.
- * A single row serialised to about 170 bytes, of which ~95 were the JSON key
- * names — `customer_id`, `churn_probability`, `uplift_score` and the rest,
- * repeated once per customer. That is roughly a megabyte of keys in a 2.3 MB
- * page, and every byte is parsed on the main thread before React can hydrate,
- * which is why the page rendered long before it would respond to a click.
- *
- * Columns say each name once. Segments are additionally factorised into a
- * codebook, so "Price Sensitive" is stored as a small integer rather than
- * fourteen characters per point.
- *
- * `risk_tier` is gone: it was only ever used to colour points by tier, and the
- * tier is a fixed function of the churn probability (0.3 / 0.6), so it is
- * derived on the client instead of shipped.
- */
 export type UmapColumns = {
   /** Segment names, indexed by `seg`. */
   segments: string[];

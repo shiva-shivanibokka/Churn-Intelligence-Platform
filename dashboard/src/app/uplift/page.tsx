@@ -27,7 +27,11 @@ export default async function UpliftPage() {
     getUpliftKpis(),
     getCustomerTypeSummary(),
     getRoiBySegment(),
-    getTopPersuadables(2000),
+    // 250, not 2,000. This feeds a "campaign priority list" ordered by ROI,
+    // and a table nobody scrolls past the first screen of was costing about a
+    // megabyte to render — the rows below the top few hundred are not a
+    // priority list, they are the rest of the segment.
+    getTopPersuadables(250),
     getUpliftScatterData(),
   ]);
   return (
