@@ -33,14 +33,13 @@ Dataset Note on Treatment Assignment:
 """
 
 import logging
+import os
+import warnings
+
+import joblib
 import numpy as np
 import pandas as pd
 import xgboost as xgb
-import warnings
-import os
-import joblib
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_auc_score
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +136,8 @@ def compute_uplift_scores_custom(
         "std_uplift": float(uplift_scores.std()),
     }
 
-    return uplift_scores, p_churn_control, metrics
+    learners = {"clf_t1": clf_t1, "clf_t0": clf_t0, "negated": False}
+    return uplift_scores, p_churn_control, metrics, learners
 
 
 def compute_uplift_scores_causalml(
@@ -165,15 +165,31 @@ def compute_uplift_scores_causalml(
         n_jobs=-1,
     )
 
-    # T-Learner
+    # CausalML's meta-learners return the treatment effect on the OUTCOME:
+    #   predict(X) = mu_1(x) - mu_0(x) = P(churn | treated) - P(churn | control)
+    #
+    # Our outcome is churn, which we want to go DOWN, so a *large positive*
+    # CausalML score is the worst possible customer to contact — contacting them
+    # raises their churn probability. The rest of this module (and
+    # classify_customer_type) uses the opposite, business-facing convention
+    # documented on compute_uplift_scores_custom:
+    #
+    #   UpliftScore = mu_0(x) - mu_1(x)   positive = intervention REDUCES churn
+    #
+    # So the raw scores are negated here. Without this negation the two code
+    # paths in this file disagree by a sign, and the CausalML path is the one
+    # that runs: every customer labelled "Persuadable" was in fact the model's
+    # strongest Sleeping Dog. The check that caught it is in the module's
+    # __main__ block and in tests/test_uplift_model.py — within the treated
+    # group, customers with a high UpliftScore must churn LESS, not more.
     t_learner = BaseTClassifier(learner=base_learner)
     t_learner.fit(X, treatment=T, y=Y)
-    uplift_t = t_learner.predict(X).flatten()
+    uplift_t = -t_learner.predict(X).flatten()
 
     # S-Learner (treatment as feature)
     s_learner = BaseSClassifier(learner=base_learner)
     s_learner.fit(X, treatment=T, y=Y)
-    uplift_s = s_learner.predict(X).flatten()
+    uplift_s = -s_learner.predict(X).flatten()
 
     # Average T and S learner scores
     uplift_scores = (uplift_t + uplift_s) / 2.0
@@ -208,7 +224,50 @@ def compute_uplift_scores_causalml(
         "std_uplift": float(uplift_scores.std()),
     }
 
-    return uplift_scores, p_churn_control, metrics
+    learners = {"t_learner": t_learner, "s_learner": s_learner, "negated": True}
+    return uplift_scores, p_churn_control, metrics, learners
+
+
+def validate_uplift_direction(
+    df: pd.DataFrame,
+    uplift_col: str = "UpliftScore",
+    treatment_col: str = "Treatment",
+    outcome_col: str = "Churn",
+    decile: float = 0.1,
+) -> dict:
+    """
+    Check that UpliftScore points the way its definition claims.
+
+    The convention this module documents is `UpliftScore = mu_0 - mu_1`, so a
+    high score means "the intervention reduces this customer's churn the most".
+    That is a claim about observable data, and it is checkable: among customers
+    who were actually treated, the top-scoring decile should churn LESS than the
+    bottom-scoring decile. If it churns more, the score is pointing backwards.
+
+    This exists because it did point backwards. CausalML returns `mu_1 - mu_0`
+    and the raw output was used unnegated, so the customers promoted as
+    "Persuadable" were the ones the model expected to be driven away. Nothing in
+    the pipeline noticed, because a wrong sign produces perfectly plausible
+    numbers — a ranked list, sensible-looking ROI, a full dashboard.
+
+    Returns the measured churn rates plus `direction_ok`. Observational, so
+    treat it as a smoke test rather than a causal estimate: it shares every
+    confound of the treatment proxy itself.
+    """
+    treated = df[df[treatment_col] == 1]
+    if len(treated) < 100 or treated[uplift_col].nunique() < 10:
+        return {"direction_ok": None, "reason": "too few treated rows to judge"}
+
+    lo, hi = treated[uplift_col].quantile([decile, 1 - decile])
+    churn_low = float(treated.loc[treated[uplift_col] <= lo, outcome_col].mean())
+    churn_high = float(treated.loc[treated[uplift_col] >= hi, outcome_col].mean())
+
+    return {
+        "direction_ok": churn_high < churn_low,
+        "churn_top_uplift_decile": round(churn_high, 4),
+        "churn_bottom_uplift_decile": round(churn_low, 4),
+        "gap": round(churn_low - churn_high, 4),
+    }
 
 
 def classify_customer_type(
@@ -232,12 +291,11 @@ def classify_customer_type(
 
     if high_churn and positive_uplift:
         return "Persuadable"
-    elif not high_churn and positive_uplift:
+    if not high_churn and positive_uplift:
         return "Sure Thing"
-    elif high_churn and not positive_uplift:
+    if high_churn and not positive_uplift:
         return "Lost Cause"
-    else:
-        return "Sleeping Dog"
+    return "Sleeping Dog"
 
 
 def estimate_intervention_roi(
@@ -290,12 +348,12 @@ def run_uplift_pipeline(
 
     if CAUSALML_AVAILABLE:
         logger.info("Running CausalML T-Learner + S-Learner ensemble...")
-        uplift_scores, p_churn_control, metrics = compute_uplift_scores_causalml(
+        uplift_scores, p_churn_control, metrics, learners = compute_uplift_scores_causalml(
             df, feature_cols
         )
     else:
         logger.info("Running custom T-Learner...")
-        uplift_scores, p_churn_control, metrics = compute_uplift_scores_custom(
+        uplift_scores, p_churn_control, metrics, learners = compute_uplift_scores_custom(
             df, feature_cols
         )
 
@@ -318,6 +376,26 @@ def run_uplift_pipeline(
         intervention_cost=intervention_cost,
     )
 
+    direction = validate_uplift_direction(df)
+    metrics["direction_check"] = direction
+    if direction["direction_ok"] is False:
+        logger.error(
+            "UPLIFT DIRECTION CHECK FAILED — among treated customers the top "
+            "uplift decile churns at %.3f against the bottom decile's %.3f. A "
+            "high UpliftScore is supposed to mean the intervention helps, so "
+            "the score is inverted and every 'Persuadable' below is really a "
+            "Sleeping Dog. Check the sign convention of the learner's predict().",
+            direction["churn_top_uplift_decile"],
+            direction["churn_bottom_uplift_decile"],
+        )
+    elif direction["direction_ok"]:
+        logger.info(
+            "Uplift direction check passed — treated top decile churns %.3f vs "
+            "bottom decile %.3f.",
+            direction["churn_top_uplift_decile"],
+            direction["churn_bottom_uplift_decile"],
+        )
+
     customer_type_counts = df["CustomerType"].value_counts().to_dict()
     n_persuadable = customer_type_counts.get("Persuadable", 0)
     n_positive_roi = df["ROIPositive"].sum()
@@ -329,6 +407,14 @@ def run_uplift_pipeline(
     # Save
     df.to_parquet(os.path.join(PROCESSED_PATH, "uplift.parquet"), index=False)
     joblib.dump(metrics, os.path.join(MODELS_PATH, "uplift_metrics.pkl"))
+    # Needed by api/serve.py. Without these the scoring endpoint had no way to
+    # estimate uplift for an unseen customer, so it passed a hardcoded 0.0 into
+    # classify_customer_type — which sits below the 0.05 threshold, so the API
+    # could only ever answer "Lost Cause" or "Sleeping Dog" regardless of input.
+    joblib.dump(
+        {"learners": learners, "feature_cols": list(feature_cols)},
+        os.path.join(MODELS_PATH, "uplift_learners.pkl"),
+    )
 
     return {
         "df": df,
