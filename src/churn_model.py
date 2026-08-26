@@ -2,13 +2,11 @@
 Per-Segment Churn Prediction
 ==============================
 Architecture mirrors Salesforce Einstein's per-segment churn scoring:
-- A separate XGBoost classifier is trained per customer segment
+- A separate CatBoost classifier is trained per customer segment
 - Stratified 80/20 holdout split ensures a true generalisation estimate
-- Probability calibration with isotonic regression ensures raw model
-  probabilities are reliable for ROI calculations (CLV, retention budget)
-- XGBoost gain-based feature importance provides global segment-level
-  explainability; per-customer explanations use a deviation-weighted
-  approximation combining global importance with individual feature values
+- Isotonic calibration on a held-out slice, so the probabilities that feed the
+  ROI maths mean what they say
+- Exact TreeSHAP from CatBoost for both global and per-customer explanations
 
 Why per-segment models?
   A single global churn model treats all customers identically.
@@ -18,41 +16,54 @@ Why per-segment models?
   Separate models capture segment-specific churn dynamics — this is the
   approach used by Salesforce for different customer tiers.
 
-Why calibration?
-  Raw XGBoost probabilities are not well-calibrated — a 0.7 probability
-  does not mean 70% of customers at that score actually churn.
-  Calibration is required whenever probabilities are used in business
-  calculations (CLV, retention ROI, budget allocation). Isotonic regression
-  is preferred over Platt scaling for non-parametric data.
+Why calibration, and why it is real here:
+  This module used to claim isotonic calibration and not perform it —
+  `calibrated_clf` was a plain alias for the base classifier, on the reasoning
+  that "CatBoost is well calibrated natively". That reasoning was wrong twice.
+  Ordered boosting helps, but these models are trained with
+  `class_weights=[1, pos_weight]`, which deliberately inflates the positive
+  class: the output is miscalibrated *by construction*. And these probabilities
+  are not just displayed — they are multiplied by CLV to rank retention spend,
+  which is exactly the case where a 0.7 that is not 70% costs money.
+  `holdout_brier_uncalibrated` and `holdout_brier` are both recorded so the
+  effect is a measurement rather than an assertion.
 
 Explainability approach:
-  TreeExplainer-based SHAP interaction values are not used because
-  XGBoost 2.x/3.x changes to base_score handling introduce instability
-  in interaction value computation. Instead this module uses:
-    1. Global: XGBoost gain-based feature importance (normalised to [0,1])
-    2. Per-customer: deviation from segment mean, weighted by global importance
-  This approximation is fast, stable, and sufficient for the retention
-  team's use case (rank features by contribution, not compute Shapley values).
-  Full TreeExplainer can be re-enabled once XGBoost stabilises the API.
+  CatBoost computes exact Shapley values in C++ via
+  `get_feature_importance(Pool(...), type="ShapValues")`. They are used
+  directly, per customer, and they carry a sign.
+
+  The previous approach deserves recording because it looked fine and was not.
+  It multiplied CatBoost's `get_feature_importance()` — an *unsigned* magnitude
+  — by each customer's deviation from the segment mean, then took the sign from
+  whether the value was above or below that mean. So the direction of every
+  driver was really just "is this above average", with no notion of whether the
+  feature pushes churn up or down: long tenure, high satisfaction and high
+  cashback all came back as "increases churn risk". Those strings are fed
+  verbatim to the retention agent, which then wrote plans to fix a customer's
+  high satisfaction score. The comment explaining the workaround blamed XGBoost
+  2.x/3.x base_score instability — a real problem, but this module stopped using
+  XGBoost, and the workaround outlived the reason for it.
 """
 
+import json
 import logging
-import numpy as np
-import pandas as pd
+import os
+import warnings
+
+import joblib
 import mlflow
 import mlflow.sklearn
-import joblib
-import os
-import json
-import warnings
-from catboost import CatBoostClassifier
-from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
-from sklearn.calibration import calibration_curve  # kept for any downstream diagnostic use
+import numpy as np
+import pandas as pd
+from catboost import CatBoostClassifier, Pool
+from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import (
-    roc_auc_score,
     average_precision_score,
     brier_score_loss,
+    roc_auc_score,
 )
+from sklearn.model_selection import StratifiedKFold, train_test_split
 
 warnings.filterwarnings("ignore")
 
@@ -60,6 +71,43 @@ logger = logging.getLogger(__name__)
 
 MODELS_PATH = os.path.join(os.path.dirname(__file__), "..", "models")
 PROCESSED_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "processed")
+
+
+class IsotonicCalibratedClassifier:
+    """
+    A fitted CatBoost model plus the isotonic map from its raw scores to
+    calibrated probabilities.
+
+    Exposes only `predict_proba`, which is the whole interface the rest of the
+    pipeline uses, so `score_customers`, the FastAPI endpoint and every
+    downstream consumer call it exactly as they called the bare classifier.
+
+    Defined at module level rather than as a closure because these objects are
+    pickled into models/segment_models.pkl, and joblib cannot pickle a local
+    function.
+    """
+
+    def __init__(self, base_clf, calibrator: IsotonicRegression, n_calibration: int):
+        self.base_clf = base_clf
+        self.calibrator = calibrator
+        # Bound the output by what the calibration sample can actually resolve.
+        #
+        # Isotonic regression is a step function fitted to observed frequencies,
+        # so its lowest bin is routinely exactly 0.0 and its highest exactly 1.0.
+        # Reporting P(churn) = 0.0 is a claim that this customer cannot churn,
+        # which no finite sample supports — and it makes any downstream log-loss
+        # infinite. The floor is the smallest rate a sample of this size can
+        # distinguish from zero, half of one observation.
+        self.eps = 1.0 / (2.0 * max(n_calibration, 1))
+
+    def predict_proba(self, X) -> np.ndarray:
+        raw = self.base_clf.predict_proba(X)[:, 1]
+        cal = np.clip(self.calibrator.predict(raw), self.eps, 1.0 - self.eps)
+        return np.column_stack([1.0 - cal, cal])
+
+    def get_feature_importance(self, *args, **kwargs):
+        """Pass through to the base model — calibration does not change SHAP."""
+        return self.base_clf.get_feature_importance(*args, **kwargs)
 
 
 def get_catboost_params(pos_weight: float = 5.0) -> dict:
@@ -101,8 +149,8 @@ def train_segment_model(
 
     Steps:
     1. Hold out 20% of the segment as a true test set (stratified split)
-    2. Train XGBoost base classifier on the 80% train split
-    3. Calibrate probabilities with isotonic regression
+    2. Train a CatBoost base classifier, early-stopped on the calibration slice
+    3. Calibrate its probabilities with isotonic regression on that same slice
     4. Compute cross-validated AUC on train split (variance estimate)
     5. Compute holdout AUC/AP/Brier on the 20% test split (generalisation estimate)
     6. Log all metrics and the model to MLflow
@@ -155,26 +203,57 @@ def train_segment_model(
     cv_auc = float(np.mean(cv_aucs)) if cv_aucs else 0.5
     cv_ap = float(np.mean(cv_aps)) if cv_aps else 0.0
 
-    # CatBoost produces well-calibrated probabilities natively (ordered boosting),
-    # so we skip the isotonic calibration wrapper and train on the full 80% split.
-    base_clf.fit(X, y)
-    calibrated_clf = base_clf  # alias — same interface (predict_proba works identically)
+    # ── Fit / calibration split, carved out of the 80% train split ───────────
+    #
+    # The 20% holdout above is never touched by anything below, so every
+    # "holdout_*" metric stays an honest generalisation estimate.
+    #
+    # The calibration slice does double duty: it is the early-stopping eval set
+    # and the sample the isotonic map is fitted on. That is a deliberate
+    # trade — a three-way split would leave the smaller segments with too little
+    # to fit on, and isotonic regression is a monotone step function with few
+    # effective parameters, so the optimism is small. It is also bounded rather
+    # than assumed: `holdout_brier` is measured on data neither step saw.
+    X_fit, X_cal, y_fit, y_cal = train_test_split(
+        X, y, test_size=0.25, random_state=42, stratify=y
+    )
 
-    # ── Train-split evaluation ────────────────────────────────────────────────
-    train_probs = base_clf.predict_proba(X)[:, 1]
-    train_brier = float(brier_score_loss(y, train_probs))
-    train_auc = float(roc_auc_score(y, train_probs))
-    train_ap = float(average_precision_score(y, train_probs))
+    # Early stopping, because 500 fixed iterations was overfitting hard: these
+    # segments scored ~0.87 AUC on their own training rows against ~0.61 on the
+    # holdout, and the 100-iteration CV estimate came out *above* the
+    # 500-iteration holdout. Fewer, better-chosen iterations is not a
+    # compromise here — it is the higher-scoring model.
+    base_clf.fit(
+        X_fit,
+        y_fit,
+        eval_set=(X_cal, y_cal),
+        early_stopping_rounds=50,
+        use_best_model=True,
+    )
+    best_iteration = int(getattr(base_clf, "best_iteration_", None) or params["iterations"])
+
+    # ── Isotonic calibration ─────────────────────────────────────────────────
+    cal_raw = base_clf.predict_proba(X_cal)[:, 1]
+    calibrator = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
+    calibrator.fit(cal_raw, y_cal)
+    calibrated_clf = IsotonicCalibratedClassifier(base_clf, calibrator, len(y_cal))
+
+    # ── Train-split evaluation (calibrated, on the rows it was fitted on) ────
+    train_probs = calibrated_clf.predict_proba(X_fit)[:, 1]
+    train_brier = float(brier_score_loss(y_fit, train_probs))
+    train_auc = float(roc_auc_score(y_fit, train_probs))
+    train_ap = float(average_precision_score(y_fit, train_probs))
 
     # ── Holdout test-split evaluation (true generalisation estimate) ─────────
-    test_probs = base_clf.predict_proba(X_test)[:, 1]
+    # Both are recorded: calibration cannot change AUC (it is monotone, so the
+    # ranking is identical by construction) but it is supposed to move Brier,
+    # and reporting the pair is what turns "we calibrate" into a measurement.
+    raw_test_probs = base_clf.predict_proba(X_test)[:, 1]
+    test_probs = calibrated_clf.predict_proba(X_test)[:, 1]
     holdout_auc = float(roc_auc_score(y_test, test_probs)) if len(np.unique(y_test)) > 1 else 0.5
     holdout_ap = float(average_precision_score(y_test, test_probs)) if len(np.unique(y_test)) > 1 else 0.0
     holdout_brier = float(brier_score_loss(y_test, test_probs))
-
-    # Convenience alias
-    probs = train_probs
-    brier = train_brier
+    holdout_brier_uncalibrated = float(brier_score_loss(y_test, raw_test_probs))
 
     # CatBoost native feature importance (PredictionValuesChange — equivalent to XGBoost gain).
     # Returns a numpy array aligned to feature_cols order.
@@ -204,6 +283,11 @@ def train_segment_model(
         "holdout_auc": holdout_auc,
         "holdout_ap": holdout_ap,
         "holdout_brier": holdout_brier,
+        # Same holdout rows, before the isotonic map — the pair is the evidence
+        # that calibration did something.
+        "holdout_brier_uncalibrated": holdout_brier_uncalibrated,
+        "n_calibration": int(len(y_cal)),
+        "best_iteration": best_iteration,
     }
 
     # MLflow logging
@@ -231,6 +315,8 @@ def train_segment_model(
                     "holdout_auc": holdout_auc,
                     "holdout_ap": holdout_ap,
                     "holdout_brier": holdout_brier,
+                    "holdout_brier_uncalibrated": holdout_brier_uncalibrated,
+                    "best_iteration": float(best_iteration),
                     "churn_rate": float(y.mean()),
                     "n_train": float(len(y)),
                     "n_test": float(len(y_test)),
@@ -240,12 +326,11 @@ def train_segment_model(
             for feat, val in mean_abs_shap.head(5).items():
                 mlflow.log_metric(f"importance_{feat}", float(val))
 
-            pass  # model artifacts saved via joblib in run_churn_pipeline
-
     logger.info(
-        "Segment '%s': CV AUC=%.3f | Holdout AUC=%.3f | Holdout Brier=%.3f | "
-        "n_train=%d, n_test=%d, churn_rate=%.2f%%",
-        segment_name, cv_auc, holdout_auc, holdout_brier, len(y), len(y_test), y.mean() * 100,
+        "Segment '%s': CV AUC=%.3f | Holdout AUC=%.3f | Holdout Brier %.4f→%.4f "
+        "(calibrated) | best_iter=%d | n_fit=%d, n_cal=%d, n_test=%d, churn_rate=%.2f%%",
+        segment_name, cv_auc, holdout_auc, holdout_brier_uncalibrated, holdout_brier,
+        best_iteration, len(y_fit), len(y_cal), len(y_test), y.mean() * 100,
     )
 
     return {
@@ -255,9 +340,9 @@ def train_segment_model(
         "metrics": metrics,
         "feature_cols": feature_cols,
         "segment_name": segment_name,
-        # Train split (used for per-customer SHAP approximation)
-        "X_train": X,
-        "y_train": y,
+        # Fit split (the rows the base model actually saw)
+        "X_train": X_fit,
+        "y_train": y_fit,
         # Holdout split (kept for post-hoc analysis and bias checks)
         "X_test": X_test,
         "y_test": y_test,
@@ -309,28 +394,25 @@ def compute_per_customer_shap(
     top_n: int = 5,
 ) -> pd.DataFrame:
     """
-    For each customer, compute the top N features driving their individual churn risk.
+    For each customer, the top N features driving their individual churn risk,
+    as exact Shapley values from the segment's own CatBoost model.
 
-    Method: deviation-weighted importance approximation
-    -------------------------------------------------------
-    For each customer we combine two signals:
-      1. Global feature importance (XGBoost gain-based, normalised to [0,1])
-         — which features matter most for this SEGMENT
-      2. Per-customer deviation from the segment mean (z-scored)
-         — which features are most abnormal for THIS individual
+    CatBoost computes these in C++ via
+    `get_feature_importance(Pool(X), type="ShapValues")`, which returns an
+    (n_rows, n_features + 1) array — the trailing column is the model's expected
+    value, and the rest sum with it to the raw prediction. They are signed and in
+    log-odds space, so a positive value genuinely means "this feature pushes this
+    customer's churn probability up".
 
-    weighted_score[feature] = |z_score[feature]| × global_importance[feature]
-
-    The sign is set by whether the feature value is above or below the segment
-    mean (above = increases churn risk for a positively-important feature).
-
-    This gives actionable, human-readable explanations in the Streamlit UI
-    without the latency and instability of running TreeExplainer at inference
-    time. The approximation is sufficient for the retention team's use case:
-    understanding WHY a specific customer is flagged as high-risk.
+    The sign is the entire point. What this replaced multiplied an *unsigned*
+    global importance by each customer's deviation from the segment mean and
+    then took the direction from whether the value was above or below that mean,
+    which reduced every explanation to "this is above average" — so a customer's
+    long tenure and high satisfaction were reported to the retention agent as
+    things increasing their churn risk.
     """
     df = df.copy()
-    shap_records = []
+    df["TopSHAPFeatures"] = "{}"
 
     for segment_name, model_dict in segment_models.items():
         if model_dict is None:
@@ -342,50 +424,30 @@ def compute_per_customer_shap(
         X_seg = df.loc[mask, feature_cols]
         base_clf = model_dict["base_clf"]
 
-        # Global SHAP importance for this segment (already computed, very fast)
-        global_shap = model_dict["mean_abs_shap"]  # pd.Series indexed by feature name
+        shap_values = base_clf.get_feature_importance(
+            Pool(X_seg), type="ShapValues"
+        )[:, :-1]  # drop the expected-value column
 
-        # Per-customer: multiply global SHAP weight by deviation from segment mean
-        # This gives a fast approximation of which features are driving THIS customer's risk
-        seg_mean = X_seg.mean()
-        seg_std = X_seg.std().replace(0, 1)  # avoid division by zero
+        # Rank each row by |contribution| without sorting all 23 columns.
+        k = min(top_n, shap_values.shape[1])
+        top_idx = np.argpartition(-np.abs(shap_values), k - 1, axis=1)[:, :k]
 
-        for idx, row in X_seg.iterrows():
-            # Standardized deviation from segment mean
-            deviation = (row - seg_mean).abs() / seg_std
-
-            # Weight deviation by global SHAP importance
-            weighted = deviation * global_shap.reindex(feature_cols).fillna(0)
-
-            # Top N features by weighted score
-            top_feats = weighted.nlargest(top_n)
-
-            # Assign sign: positive if above mean (increases risk for risk features)
-            top_dict = {}
-            for feat in top_feats.index:
-                raw_val = float(row[feat])
-                mean_val = float(seg_mean[feat])
-                shap_sign = float(global_shap.get(feat, 0))
-                # Approximate signed SHAP: positive = above mean for a positive-SHAP feature
-                signed = abs(float(weighted[feat])) * (1 if raw_val > mean_val else -1)
-                top_dict[feat] = round(signed, 4)
-
-            shap_records.append(
-                {
-                    "CustomerID": df.loc[idx, "CustomerID"]
-                    if "CustomerID" in df.columns
-                    else idx,
-                    "index": idx,
-                    "TopSHAPFeatures": json.dumps(top_dict),
-                }
+        features = np.asarray(feature_cols)
+        records = []
+        for row_i, cols in enumerate(top_idx):
+            vals = shap_values[row_i, cols]
+            order = np.argsort(-np.abs(vals))  # strongest first, for display
+            records.append(
+                json.dumps(
+                    {
+                        str(features[cols[j]]): round(float(vals[j]), 4)
+                        for j in order
+                    }
+                )
             )
 
-    if not shap_records:
-        df["TopSHAPFeatures"] = "{}"
-        return df
+        df.loc[mask, "TopSHAPFeatures"] = records
 
-    shap_df = pd.DataFrame(shap_records).set_index("index")
-    df = df.join(shap_df[["TopSHAPFeatures"]], how="left", rsuffix="_shap")
     return df
 
 
@@ -434,13 +496,17 @@ def run_churn_pipeline(
                 np.mean([m["holdout_brier"] for m in valid_metrics])
             )
             avg_train_brier = float(np.mean([m["train_brier"] for m in valid_metrics]))
+            avg_holdout_brier_uncal = float(
+                np.mean([m["holdout_brier_uncalibrated"] for m in valid_metrics])
+            )
+            mlflow.log_metric("avg_holdout_brier_uncalibrated", avg_holdout_brier_uncal)
             mlflow.log_metric("avg_cv_auc_across_segments", avg_cv_auc)
             mlflow.log_metric("avg_holdout_auc_across_segments", avg_holdout_auc)
             mlflow.log_metric("avg_holdout_brier_across_segments", avg_holdout_brier)
             mlflow.log_metric("avg_train_brier_across_segments", avg_train_brier)
             logger.info(
-                "Aggregate: CV AUC=%.3f | Holdout AUC=%.3f | Holdout Brier=%.3f",
-                avg_cv_auc, avg_holdout_auc, avg_holdout_brier,
+                "Aggregate: CV AUC=%.3f | Holdout AUC=%.3f | Holdout Brier %.4f→%.4f",
+                avg_cv_auc, avg_holdout_auc, avg_holdout_brier_uncal, avg_holdout_brier,
             )
 
     # Score all customers
