@@ -1,75 +1,51 @@
 {
   "id": "chat-1",
   "mode": "chat",
-  "model": "openai/gpt-oss-120b",
+  "provider": "anthropic",
+  "model": "claude-sonnet-5",
   "max_rounds": 5,
   "answer_max_tokens": 4096,
   "question": "Which segment has the most revenue at risk, and how much?",
-  "response": "**Segment with the highest revenue at risk:** **Price Sensitive**  \n\n**Estimated revenue at risk:** **$1,936,000** (based on an average churn probability of 29.9% and an assumed $500 CLV per customer).",
+  "response": "**Lapsed** customers have the most revenue at risk: **$1,997,500** (from ~3,995 expected churners at $500 CLV each).\n\nThis is closely followed by Price Sensitive ($1,936,000). Together these two segments account for over half of the total $7.36M at-risk revenue across all segments. Want me to pull the top at-risk customers within the Lapsed segment so you can prioritize outreach?",
   "trace": [
     {
       "round": 1,
-      "tool": "get_all_segment_benchmarks",
-      "args": {},
-      "result": [
-        {
-          "segment": "Price Sensitive",
-          "customer_count": 12966,
-          "churn_rate": "30.0%",
-          "avg_churn_prob": "29.9%",
-          "high_risk_pct": "1.8%",
-          "persuadable_pct": "16.7%"
-        },
-        {
-          "segment": "Lapsed",
-          "customer_count": 11975,
-          "churn_rate": "33.3%",
-          "avg_churn_prob": "33.4%",
-          "high_risk_pct": "0.0%",
-          "persuadable_pct": "26.9%"
-        },
-        {
-          "segment": "Loyal Customers",
-          "customer_count": 9553,
-          "churn_rate": "28.0%",
-          "avg_churn_prob": "28.0%",
-          "high_risk_pct": "0.0%",
-          "persuadable_pct": "7.4%"
-        },
-        {
-          "segment": "At-Risk",
-          "customer_count": 8400,
-          "churn_rate": "26.4%",
-          "avg_churn_prob": "26.3%",
-          "high_risk_pct": "0.0%",
-          "persuadable_pct": "15.2%"
-        },
-        {
-          "segment": "Champions",
-          "customer_count": 8153,
-          "churn_rate": "23.9%",
-          "avg_churn_prob": "24.1%",
-          "high_risk_pct": "1.1%",
-          "persuadable_pct": "2.9%"
-        }
-      ]
-    },
-    {
-      "round": 2,
       "tool": "get_revenue_at_risk",
-      "args": {
-        "segment": "Price Sensitive"
-      },
+      "args": {},
       "result": {
-        "segment": "Price Sensitive",
-        "total_customers": 12966,
-        "avg_churn_prob": "29.9%",
-        "expected_churners": 3872,
-        "estimated_revenue_at_risk": "$1,936,000",
+        "total_expected_churners": 14712,
+        "total_revenue_at_risk": "$7,356,000",
+        "by_segment": [
+          {
+            "segment": "Price Sensitive",
+            "expected_churners": 3872,
+            "revenue_at_risk": "$1,936,000"
+          },
+          {
+            "segment": "Lapsed",
+            "expected_churners": 3995,
+            "revenue_at_risk": "$1,997,500"
+          },
+          {
+            "segment": "Loyal Customers",
+            "expected_churners": 2677,
+            "revenue_at_risk": "$1,338,500"
+          },
+          {
+            "segment": "At-Risk",
+            "expected_churners": 2207,
+            "revenue_at_risk": "$1,103,500"
+          },
+          {
+            "segment": "Champions",
+            "expected_churners": 1961,
+            "revenue_at_risk": "$980,500"
+          }
+        ],
         "note": "Assumes $500 CLV per customer."
       }
     }
   ],
   "truncated": false,
-  "elapsed_seconds": 14.16
+  "elapsed_seconds": 11.79
 }

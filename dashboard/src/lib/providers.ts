@@ -47,6 +47,21 @@ export type Provider = {
   defaultModel: string;
   /** Whether the free tier is generous enough to matter to someone trying this. */
   note: string;
+  /**
+   * How this provider's model list is authenticated.
+   *
+   * "OpenAI-compatible" describes the chat-completions surface, and does not
+   * always extend to `/models`. Anthropic accepts `Authorization: Bearer` on
+   * `/v1/chat/completions` but its `/v1/models` is the native endpoint, which
+   * wants `x-api-key` and an `anthropic-version` — so the OpenAI SDK's
+   * `models.list()` comes back `401 Invalid bearer token` against a perfectly
+   * good key. Listing models is the one place the compatibility layer leaks.
+   */
+  modelsAuth?: "bearer" | "x-api-key";
+  /** Override when the model list does not live under `baseUrl`. */
+  modelsUrl?: string;
+  /** Extra headers the model list needs. */
+  modelsHeaders?: Record<string, string>;
 };
 
 export const PROVIDERS: Record<ProviderId, Provider> = {
@@ -78,8 +93,11 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     keyUrl: "https://console.anthropic.com/settings/keys",
     keyPattern: /^sk-ant-[A-Za-z0-9_-]{20,}$/,
     keyHint: "sk-ant-…",
-    defaultModel: "claude-sonnet-4-5",
+    defaultModel: "claude-sonnet-5",
     note: "Paid. Strong tool calling.",
+    modelsAuth: "x-api-key",
+    modelsUrl: "https://api.anthropic.com/v1/models",
+    modelsHeaders: { "anthropic-version": "2023-06-01" },
   },
   gemini: {
     id: "gemini",

@@ -182,9 +182,18 @@ rendered through the same components a live run uses, produced by
 `scripts/record_agent_runs.py` and verified by `--check` (which fails on an
 unredacted key, a truncated answer, or a plan missing its fields).
 
-*Only Groq is verified end to end here, because it is the one provider I hold a
-key for. The other five are wired through the same OpenAI-compatible client and
-the same model-listing endpoint, but I have not run them.*
+**Two providers verified end to end: Groq and Anthropic.** The recorded runs
+above were made with Anthropic's `claude-sonnet-5`. OpenAI, Gemini, OpenRouter
+and Cerebras are wired through the same client and the same listing endpoint but
+have not been run — I hold keys for two.
+
+Wiring the second one was worth it, because it broke in a way the first could
+not reveal. "OpenAI-compatible" describes the *chat-completions* surface and
+does not always extend to `/models`: Anthropic accepts `Authorization: Bearer`
+on `/v1/chat/completions` and rejects it on `/v1/models`, which wants
+`x-api-key` and an `anthropic-version` header. The SDK's `models.list()` came
+back `401 Invalid bearer token` against a perfectly good key. A provider can now
+declare how its model list is authenticated.
 
 **AI Agent (12 tools)**
 

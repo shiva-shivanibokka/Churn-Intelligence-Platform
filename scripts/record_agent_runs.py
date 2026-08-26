@@ -77,7 +77,7 @@ OUT_DIR = ROOT / "dashboard" / "public" / "agent-runs"
 PROVIDER_KEYS = {
     "groq": ("GROQ_API_KEY", "openai/gpt-oss-120b"),
     "openai": ("OPENAI_API_KEY", "gpt-4o-mini"),
-    "anthropic": ("ANTHROPIC_API_KEY", "claude-sonnet-4-5"),
+    "anthropic": ("ANTHROPIC_API_KEY", "claude-sonnet-5"),
     "gemini": ("GEMINI_API_KEY", "gemini-2.0-flash"),
     "openrouter": ("OPENROUTER_API_KEY", "openai/gpt-4o-mini"),
     "cerebras": ("CEREBRAS_API_KEY", "llama-3.3-70b"),
@@ -105,16 +105,29 @@ CHAT_QUESTIONS = [
 
 
 def load_env(var_name: str) -> str:
-    """Read one provider's key from .env without importing the whole config module."""
+    """
+    Read one provider's key from .env, letting .env win over the environment.
+
+    `setdefault` was wrong here, and wrong in a way that wastes money. A stale
+    `ANTHROPIC_API_KEY` exported by some other tool would keep its place, the
+    project's own .env would be ignored, and the run would fail on a dead
+    credential while the file you just edited sat there looking correct. This
+    exact thing happened: same key length, different value, and a 401 that looked
+    like the new key was bad.
+
+    A project-local .env is the authority for the project. The environment is the
+    fallback, so CI and containers still work with no file present.
+    """
     env_path = ROOT / ".env"
+    from_file: dict[str, str] = {}
     if env_path.exists():
         for line in env_path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 name, _, value = line.partition("=")
-                os.environ.setdefault(name.strip(), value.strip())
+                from_file[name.strip()] = value.strip()
 
-    key = os.environ.get(var_name, "").strip()
+    key = (from_file.get(var_name) or os.environ.get(var_name, "")).strip()
     if not key:
         raise SystemExit(
             f"{var_name} is not set. Add it to .env — it is used once, here, to "

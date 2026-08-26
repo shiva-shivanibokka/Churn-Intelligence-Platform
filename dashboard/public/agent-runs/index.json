@@ -1,44 +1,45 @@
 {
-  "model": "openai/gpt-oss-120b",
+  "provider": "anthropic",
+  "model": "claude-sonnet-5",
   "runs": [
     {
       "id": "batch-3343502",
       "mode": "batch",
       "label": "Retention plan for 3343502",
-      "tool_calls": 5,
-      "elapsed_seconds": 7.57,
+      "tool_calls": 7,
+      "elapsed_seconds": 50.71,
       "truncated": false
     },
     {
       "id": "batch-3326206",
       "mode": "batch",
       "label": "Retention plan for 3326206",
-      "tool_calls": 5,
-      "elapsed_seconds": 81.31,
+      "tool_calls": 7,
+      "elapsed_seconds": 27.2,
       "truncated": false
     },
     {
       "id": "batch-3265758",
       "mode": "batch",
       "label": "Retention plan for 3265758",
-      "tool_calls": 5,
-      "elapsed_seconds": 22.39,
+      "tool_calls": 6,
+      "elapsed_seconds": 27.25,
       "truncated": false
     },
     {
       "id": "chat-1",
       "mode": "chat",
       "label": "Which segment has the most revenue at risk, and how much?",
-      "tool_calls": 2,
-      "elapsed_seconds": 14.16,
+      "tool_calls": 1,
+      "elapsed_seconds": 11.79,
       "truncated": false
     },
     {
       "id": "chat-2",
       "mode": "chat",
       "label": "Compare all five segments \u2014 where should we focus retention spend first?",
-      "tool_calls": 1,
-      "elapsed_seconds": 5.54,
+      "tool_calls": 2,
+      "elapsed_seconds": 14.67,
       "truncated": false
     },
     {
@@ -46,7 +47,7 @@
       "mode": "chat",
       "label": "Which persuadable customers have not been contacted yet? Give me the top five.",
       "tool_calls": 1,
-      "elapsed_seconds": 2.16,
+      "elapsed_seconds": 7.94,
       "truncated": false
     }
   ]

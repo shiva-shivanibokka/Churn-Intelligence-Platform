@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
-import { resolveProvider, scrubKeys } from "@/lib/providers";
+import { resolveProvider, scrubKeys, type Provider } from "@/lib/providers";
 
 /**
  * List the models a visitor's key can actually reach.
@@ -23,6 +23,40 @@ export const dynamic = "force-dynamic";
 /** Models that cannot hold a tool-calling conversation, whatever they are named. */
 const NOT_CHAT = /whisper|tts|embed|guard|moderation|orpheus|distil|safeguard|rerank|vision-only/i;
 
+/**
+ * Ask one provider what it serves.
+ *
+ * Most of them answer the OpenAI SDK's `models.list()`. Anthropic does not:
+ * its `/v1/models` is the native endpoint and rejects `Authorization: Bearer`
+ * with `401 Invalid bearer token`, even though the very same key works on
+ * `/v1/chat/completions`. So a provider may declare its own listing auth, and
+ * that path is a plain fetch rather than the SDK.
+ */
+async function listModels(provider: Provider, key: string): Promise<string[]> {
+  if (provider.modelsAuth === "x-api-key") {
+    const res = await fetch(provider.modelsUrl ?? `${provider.baseUrl}/models`, {
+      headers: { "x-api-key": key, ...(provider.modelsHeaders ?? {}) },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) {
+      const err = new Error(`models list returned ${res.status}`) as Error & { status?: number };
+      err.status = res.status;
+      throw err;
+    }
+    const body = (await res.json()) as { data?: { id: string }[] };
+    return (body.data ?? []).map((m) => m.id);
+  }
+
+  const client = new OpenAI({
+    apiKey: key,
+    baseURL: provider.baseUrl,
+    timeout: 15_000,
+    maxRetries: 1,
+  });
+  const list = await client.models.list();
+  return list.data.map((m) => m.id);
+}
+
 export async function POST(req: NextRequest) {
   let provider;
   try {
@@ -40,24 +74,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const client = new OpenAI({
-    apiKey: key,
-    baseURL: provider.baseUrl,
-    timeout: 15_000,
-    maxRetries: 1,
-  });
-
   try {
-    const list = await client.models.list();
-    const models = list.data
-      .map((m) => m.id)
+    const models = (await listModels(provider, key))
       .filter((id) => !NOT_CHAT.test(id))
       .sort();
 
-    // Some providers do not expose /models, or expose it without the chat
-    // models in it. An empty list is not an error — it means "we could not
-    // enumerate", and the UI should let the visitor type a name instead of
-    // presenting an empty dropdown as if nothing were available.
+    // Some providers do not expose a model list at all. An empty result is not
+    // an error — it means "could not enumerate" — and the UI should offer a
+    // text field rather than an empty dropdown that looks like "nothing here".
     return NextResponse.json({
       models,
       // Only suggest the configured default if the provider actually lists it.
