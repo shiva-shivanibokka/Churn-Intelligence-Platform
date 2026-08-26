@@ -4,7 +4,77 @@ import type { ChatCompletionMessageParam, ChatCompletionTool } from "groq-sdk/re
 import { createClient } from "@supabase/supabase-js";
 import { AGENT_MODEL } from "@/lib/models";
 
-const groq = new GroqClient({ apiKey: process.env.GROQ_API_KEY || "" });
+/**
+ * Bring-your-own-key, and only that.
+ *
+ * There is deliberately no shared key on this deployment. A public agent
+ * endpoint backed by the owner's Groq free tier is a 100k-token-a-day budget
+ * that any visitor — or any script — can finish, and when they do the feature
+ * is dead for everyone else until the daily reset. Worse, it is dead in a way
+ * that reads as "this project is broken" rather than "someone used it up".
+ *
+ * So the visitor brings their own credential. The agent is then never
+ * rate-limited by someone else's usage, this project has no secret to leak or
+ * rotate, and the demo cannot be turned off by a stranger with a for-loop.
+ *
+ * The key travels in a request header, constructs a client for that one
+ * request, and is never written down: not to Supabase, not to a log line, not
+ * into `retention_actions`, and never into a URL, where it would land in
+ * Vercel's access logs and the visitor's browser history.
+ *
+ * The base URL is deliberately NOT configurable. Accepting a caller-supplied
+ * endpoint alongside a caller-supplied key turns this route into an open proxy:
+ * anything with a `fetch` could point it at an internal address and read the
+ * response back through us. The host is fixed; only the credential varies.
+ */
+
+/** Groq keys look like `gsk_…`. A cheap shape check, not authentication. */
+function readUserKey(req: NextRequest): string | null {
+  const raw = req.headers.get("x-groq-key")?.trim();
+  if (!raw) return null;
+  if (!/^gsk_[A-Za-z0-9]{20,}$/.test(raw)) return null;
+  return raw;
+}
+
+/**
+ * Never let a key reach a log or a response body.
+ *
+ * Provider SDKs sometimes echo request context into error messages, and this
+ * route's catch-all returns the message to the browser. One bad interaction
+ * between those two would hand a visitor's credential to whoever is watching,
+ * so it is scrubbed on the way out regardless of what any SDK version does.
+ */
+function scrub(text: string): string {
+  return text.replace(/gsk_[A-Za-z0-9]{20,}/g, "gsk_***");
+}
+
+/** Groq reports "out of quota" a few different ways. */
+function isQuotaError(err: unknown): boolean {
+  const status = (err as { status?: number })?.status;
+  if (status === 429) return true;
+  const message = String((err as { message?: string })?.message ?? err).toLowerCase();
+  return message.includes("rate limit") || message.includes("quota");
+}
+
+function isAuthError(err: unknown): boolean {
+  const status = (err as { status?: number })?.status;
+  return status === 401 || status === 403;
+}
+
+/**
+ * A hosted model that has been retired.
+ *
+ * This is worth its own branch because it happened: Groq withdrew
+ * `llama-3.3-70b-versatile` and every request began returning 404
+ * `model_not_found`, which reached the browser as a generic 500. The agent
+ * looked broken rather than misconfigured, and nothing in CI could notice — the
+ * model name is a valid string in correct code that simply stopped existing.
+ */
+function isRetiredModel(err: unknown): boolean {
+  const status = (err as { status?: number })?.status;
+  const message = String((err as { message?: string })?.message ?? err);
+  return status === 404 && message.includes("model");
+}
 
 // Read client — anon key, respects RLS
 const supabase = createClient(
@@ -41,6 +111,24 @@ const MAX_ROUNDS = 5;
 // while the rounds got 4,096, so the one message that has to carry the whole
 // recommendation had the tightest budget of any of them.
 const ANSWER_MAX_TOKENS = 4096;
+
+/**
+ * Time budget, because the SDK's defaults turn a rate limit into a hang.
+ *
+ * groq-sdk retries a 429 on its own, honouring Groq's `retry-after` — which on
+ * the free tier can be minutes. A single rate-limited request was observed
+ * sitting for **5.6 minutes** before dying with "Connection error". On Vercel
+ * that is not a slow answer, it is a function timeout at 60 seconds
+ * (`maxDuration` in vercel.json) with nothing useful to show the visitor, and
+ * it makes the quota branch below unreachable — the very case it exists for.
+ *
+ * So: one short retry for a genuine blip, a hard per-request ceiling, and a
+ * deadline across the whole ReAct loop, since five rounds of 20s would blow the
+ * function limit even with every individual call inside its own.
+ */
+const REQUEST_TIMEOUT_MS = 20_000;
+const REQUEST_RETRIES = 1;
+const LOOP_BUDGET_MS = 50_000;
 
 // ─── Tool definitions ──────────────────────────────────────────────────────────
 
@@ -620,13 +708,21 @@ function stripThinking(text: string): string {
 }
 
 async function runAgentLoop(
-  messages: ChatCompletionMessageParam[]
+  groq: GroqClient,
+  messages: ChatCompletionMessageParam[],
+  mode: "batch" | "chat"
 ): Promise<{ response: string; trace: unknown[]; truncated: boolean }> {
   const trace: unknown[] = [];
   const apiMessages: ChatCompletionMessageParam[] = [...messages];
   let truncated = false;
+  const deadline = Date.now() + LOOP_BUDGET_MS;
 
   for (let round = 1; round <= MAX_ROUNDS; round++) {
+    // Stop starting rounds we cannot afford to finish. Running out of rounds
+    // lands on the forced summary below, which is a real answer; running out of
+    // wall clock lands on a Vercel timeout, which is a blank page.
+    if (Date.now() > deadline - REQUEST_TIMEOUT_MS) break;
+
     const completion = await groq.chat.completions.create({
       model: MODEL,
       messages: apiMessages,
@@ -651,16 +747,27 @@ async function runAgentLoop(
       tool_calls: msg.tool_calls ?? undefined,
     } as ChatCompletionMessageParam);
 
-    // Finish only when there is nothing left to run.
+    // Finish only when there is nothing left to run AND something was said.
     //
-    // This used to also return on `finish_reason === "stop"`, as an OR. When a
-    // model returns "stop" *alongside* tool calls — which happens — the loop
-    // returned immediately, threw the tool calls away, and handed back whatever
-    // text was in that message. That text is usually empty when the model is
-    // calling tools, so the user got a blank reply and the trace showed the
-    // agent had done no work.
+    // Two separate traps here, both of which shipped.
+    //
+    // The first: this used to also return on `finish_reason === "stop"`, as an
+    // OR. When a model returns "stop" *alongside* tool calls — which happens —
+    // the loop returned immediately, threw the tool calls away, and handed back
+    // whatever text was in that message. That text is usually empty when a model
+    // is calling tools, so the user got a blank reply over a trace showing no
+    // work done.
+    //
+    // The second: a message with no tool calls and no content is not an answer,
+    // but it satisfies "nothing left to run" and was returned as one. In batch
+    // mode that empty string then reached JSON.parse and surfaced as "Could not
+    // parse agent response" — a recorded run failed exactly this way, three tool
+    // calls deep with an empty reply. Falling through to the forced final call
+    // gives the model one more chance under a stricter contract, which is what
+    // that call is for.
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
-      return { response: cleanContent, trace, truncated };
+      if (cleanContent.trim()) return { response: cleanContent, trace, truncated };
+      break;
     }
 
     for (const tc of msg.tool_calls) {
@@ -678,15 +785,90 @@ async function runAgentLoop(
     }
   }
 
-  // Max rounds — force a final answer, with no tools offered so it cannot ask
-  // for another round it will not get.
-  const final = await groq.chat.completions.create({
-    model: MODEL,
-    messages: [...apiMessages, { role: "user", content: "Summarise findings and give a final recommendation now." }],
-    max_tokens: ANSWER_MAX_TOKENS,
-  });
-  if (final.choices[0].finish_reason === "length") truncated = true;
-  return { response: stripThinking(final.choices[0].message.content ?? ""), trace, truncated };
+  // Out of rounds or out of time — ask for a final answer.
+  //
+  // Reaching here is normal, not exceptional: a batch plan routinely spends
+  // every round on tool calls, so this is the step that actually produces the
+  // answer. Getting it right took three attempts, and each failure is worth
+  // recording because they all looked like the model misbehaving.
+  //
+  //  1. Asking for prose in both modes. Batch's contract is a JSON object, so
+  //     the model tried to smuggle it out as a tool call named `json`, which
+  //     Groq rejects. Two of three recorded runs came back unparseable.
+  //  2. Asking for JSON but leaving the tool history in place. With a dozen
+  //     tool calls behind it the model simply wanted another one, and omitting
+  //     the `tools` array makes Groq infer `tool_choice: "none"` — so a model
+  //     that calls a tool anyway fails the entire request with
+  //     `400 tool_use_failed`, at the last step, after every tool call has
+  //     already been made and paid for.
+  //
+  // What works is removing the momentum rather than fighting it. The batch
+  // final call gets a fresh conversation — the instructions, the original
+  // request, and everything the tools returned flattened into one plain-text
+  // block — so there is no assistant/tool exchange to continue and nothing to
+  // call. `response_format: json_object` then makes the shape the provider's
+  // problem instead of a request in a prompt.
+  //
+  // Chat keeps its tools and `tool_choice: "auto"`, because prose has no shape
+  // to enforce and an extra tool call there is harmless.
+  const isBatch = mode === "batch";
+  let response = "";
+
+  const finalMessages: ChatCompletionMessageParam[] = isBatch
+    ? [
+        messages[0], // the system prompt, with the JSON schema in it
+        ...messages.slice(1).filter((m) => m.role === "user"),
+        {
+          role: "user",
+          content:
+            "Here is everything your tools returned:\n\n" +
+            JSON.stringify(trace, null, 1).slice(0, 12_000) +
+            "\n\nOutput the final recommendation now as the JSON object described " +
+            "above. JSON only.",
+        },
+      ]
+    : [
+        ...apiMessages,
+        {
+          role: "user",
+          content:
+            "Summarise your findings and give a final recommendation now, in " +
+            "prose. Do not call any more tools — you have everything you need.",
+        },
+      ];
+
+  try {
+    const final = await groq.chat.completions.create({
+      model: MODEL,
+      messages: finalMessages,
+      ...(isBatch
+        ? { response_format: { type: "json_object" as const } }
+        : { tools: TOOLS, tool_choice: "auto" as const }),
+      max_tokens: ANSWER_MAX_TOKENS,
+    });
+    if (final.choices[0].finish_reason === "length") truncated = true;
+    response = stripThinking(final.choices[0].message.content ?? "");
+  } catch (err) {
+    console.error("Agent: final summary call failed —", scrub(String(err)));
+  }
+
+  // A model that spent its last turn calling tools leaves no prose behind. The
+  // work is not lost — the trace is real and the UI renders it — so say what
+  // happened rather than returning an empty bubble.
+  //
+  // Batch mode gets nothing here on purpose: any filler would be parsed as the
+  // plan and fail, and the caller's explicit message about an empty response is
+  // better than "could not parse".
+  if (!response.trim() && !isBatch) {
+    const used = [...new Set(trace.map((t) => (t as { tool: string }).tool))];
+    response =
+      `I gathered data across ${trace.length} tool call${trace.length === 1 ? "" : "s"}` +
+      (used.length ? ` (${used.join(", ")})` : "") +
+      " but ran out of reasoning rounds before writing a conclusion. The findings " +
+      "are in the reasoning trace below — ask a narrower question for a direct answer.";
+  }
+
+  return { response, trace, truncated };
 }
 
 // ─── Abuse limits ──────────────────────────────────────────────────────────────
@@ -707,10 +889,15 @@ async function runAgentLoop(
  * against someone who wants the quota gone. The real fix is a shared store
  * (Vercel KV, Upstash) and that is a dependency this project does not need yet.
  */
-const RATE_LIMIT = { windowMs: 10 * 60_000, maxRequests: 15 };
+const RATE_LIMIT = { windowMs: 10 * 60_000, maxRequests: 60 };
 const hits = new Map<string, number[]>();
 
 function rateLimited(ip: string): boolean {
+  // Generous, because visitors spend their own quota — but not absent. The
+  // limit is no longer about protecting a token budget; it stops this route
+  // being used as a general-purpose Groq proxy, and stops a script filling
+  // `retention_actions` with junk.
+  const max = RATE_LIMIT.maxRequests;
   const now = Date.now();
   const cutoff = now - RATE_LIMIT.windowMs;
   const recent = (hits.get(ip) ?? []).filter((t) => t > cutoff);
@@ -723,7 +910,7 @@ function rateLimited(ip: string): boolean {
       if (times.every((t) => t <= cutoff)) hits.delete(key);
     }
   }
-  return recent.length > RATE_LIMIT.maxRequests;
+  return recent.length > max;
 }
 
 /** Longest conversation the client may replay back at us. */
@@ -746,14 +933,37 @@ function sanitiseHistory(history: ChatCompletionMessageParam[] | undefined) {
 
 export async function POST(req: NextRequest) {
   try {
+    const userKey = readUserKey(req);
+    if (!userKey) {
+      const supplied = req.headers.get("x-groq-key")?.trim();
+      return NextResponse.json(
+        {
+          error: supplied
+            ? "That does not look like a Groq key — they start with `gsk_`. Copy it " +
+              "whole from console.groq.com."
+            : "The agent runs on your own Groq key. Add one to use it; everything else " +
+              "on this dashboard works without it.",
+          needs_key: true,
+        },
+        { status: 401 }
+      );
+    }
+
+    // One client, for this request only. Never cached, never reused across
+    // visitors, gone when the handler returns.
+    const groq = new GroqClient({
+      apiKey: userKey,
+      timeout: REQUEST_TIMEOUT_MS,
+      maxRetries: REQUEST_RETRIES,
+    });
+
     // Vercel sets x-forwarded-for; the first entry is the client.
     const ip = (req.headers.get("x-forwarded-for") ?? "unknown").split(",")[0].trim();
     if (rateLimited(ip)) {
       return NextResponse.json(
         {
           error: `Rate limit reached — ${RATE_LIMIT.maxRequests} agent requests per ` +
-            `${RATE_LIMIT.windowMs / 60_000} minutes. This demo runs on Groq's free tier ` +
-            "and the limit is what keeps it available for everyone.",
+            `${RATE_LIMIT.windowMs / 60_000} minutes.`,
         },
         { status: 429 }
       );
@@ -791,7 +1001,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const { response, trace, truncated } = await runAgentLoop(messages);
+    const { response, trace, truncated } = await runAgentLoop(groq, messages, mode);
 
     if (mode === "batch") {
       let raw = response;
@@ -859,7 +1069,49 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ response, trace, truncated });
   } catch (err: unknown) {
-    console.error("Agent error:", err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    // A spent quota is an ordinary, expected outcome on a free tier and is not
+    // the same thing as the agent being broken, so it is reported as itself
+    // rather than as a stack trace.
+    if (isQuotaError(err)) {
+      console.error("Agent: visitor key is rate limited or out of quota");
+      return NextResponse.json(
+        {
+          error: "Groq is rate limiting that key, or its daily quota is spent. The key " +
+            "itself is fine — the free tier resets daily.",
+          quota_exhausted: true,
+        },
+        { status: 429 }
+      );
+    }
+
+    if (isRetiredModel(err)) {
+      console.error(`Agent: Groq no longer serves ${MODEL} — update AGENT_MODEL in src/lib/models.ts`);
+      return NextResponse.json(
+        {
+          error: `This deployment is configured to use \`${MODEL}\`, which Groq no ` +
+            "longer serves. That is a configuration problem here, not a problem with " +
+            "your key — hosted model names get retired, and this one has been.",
+          retired_model: true,
+        },
+        { status: 503 }
+      );
+    }
+
+    if (isAuthError(err)) {
+      console.error("Agent: Groq rejected the visitor's key");
+      return NextResponse.json(
+        {
+          error: "Groq rejected that key. Check it was copied whole from console.groq.com.",
+          invalid_key: true,
+          needs_key: true,
+        },
+        { status: 401 }
+      );
+    }
+
+    // scrub, because this path returns the message to the browser and a
+    // provider SDK can echo request context into it.
+    console.error("Agent error:", scrub(String(err)));
+    return NextResponse.json({ error: scrub(String(err)) }, { status: 500 });
   }
 }

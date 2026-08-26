@@ -7,7 +7,9 @@
 ![Docker](https://img.shields.io/badge/docker-build-passing)
 ![Deployed](https://img.shields.io/badge/dashboard-live%20on%20Vercel-black)
 
-**Live dashboard:** [customer-segmentation-churn.vercel.app](https://customer-segmentation-churn.vercel.app/retention)
+**Live dashboard:** [customer-segmentation-churn.vercel.app](https://customer-segmentation-churn.vercel.app/)
+**AI agent — recorded runs, no key needed:** [/retention](https://customer-segmentation-churn.vercel.app/retention)
+**AI agent — live, with your own free Groq key:** [/retention](https://customer-segmentation-churn.vercel.app/retention) → *Generate Action Plan*
 
 ---
 
@@ -126,6 +128,39 @@ flowchart TD
 - **Uplift** — customer type funnel, ROI by segment, top Persuadable priority list, uplift vs. churn probability scatter
 - **Retention** — Persuadable customer list, AI agent in two modes (batch auto-generate or conversational chat), collapsible agent reasoning trace
 - **Analytics** — full audit log of generated actions, outcome feedback (retained / churned / pending), success rate by intervention type
+
+### Two ways to run the agent
+
+The four analytics pages need no key at all — they read Supabase directly. The
+agent is the one feature that costs money to run, and it is offered two ways.
+
+| | What you get | What it costs you |
+|---|---|---|
+| **Watch a Recorded Run** | Six real agent runs — three retention plans and three questions — captured against the live database and committed as static JSON. Full reasoning traces, real tool calls, real numbers. | Nothing. No key, no signup. |
+| **Generate Action Plan** / **Ask AI Assistant** | The live 12-tool ReAct agent, answering about any customer you pick. | A [free Groq key](https://console.groq.com/keys), pasted into the page. |
+
+**Why there is no shared key.** A public agent endpoint backed by the owner's
+Groq free tier is a 100,000-token-a-day budget shared by every visitor, and the
+first person with a `for` loop turns the feature off for everyone else — in a
+way that reads as "this project is broken" rather than "someone used it up".
+So this deployment holds no Groq credential at all. That also means there is no
+secret here to leak or rotate, and nothing a stranger can spend.
+
+**What happens to your key.** It is held in `sessionStorage` for the tab you
+are in, sent as a request header to this site's own agent route, and forwarded
+to Groq. It is never stored server-side, never written to the database, never
+logged, and never put in a URL — where it would end up in access logs and
+browser history. Close the tab and it is gone. The base URL is not
+configurable, deliberately: accepting a caller-supplied endpoint alongside a
+caller-supplied key would make the route an open proxy.
+
+**Why the recordings exist.** Bring-your-own-key is the right trade for anyone
+willing to paste a key, and the wrong one for someone evaluating this in three
+minutes — "add your own key" and "this does not work" look identical at a
+glance. The recorded runs are real calls to the same `/api/agent` route,
+rendered through the same components a live run uses, produced by
+`scripts/record_agent_runs.py` and verified by `--check` (which fails on an
+unredacted key, a truncated answer, or a plan missing its fields).
 
 **AI Agent (12 tools)**
 
@@ -318,7 +353,9 @@ SUPABASE_SERVICE_ROLE_KEY=eyJ...          # server-side only, bypasses RLS for w
 # Direct PostgreSQL connection — Project → Settings → Database → URI
 DATABASE_URL=postgresql://postgres:password@db.your-project.supabase.co:5432/postgres
 
-# Groq (free tier at console.groq.com)
+# Groq — needed locally to run the Streamlit prototype or to record agent runs.
+# NOT set on the deployment: the hosted agent is bring-your-own-key, so the
+# public site has no Groq credential of its own.
 GROQ_API_KEY=gsk_...
 
 # Kaggle (only needed to download raw datasets)
@@ -449,18 +486,23 @@ Churn-Intelligence-Platform/
 │   │   │   ├── retention/page.tsx
 │   │   │   ├── analytics/page.tsx
 │   │   │   ├── error.tsx               # Shown when a data load throws (see Deployment)
-│   │   │   ├── api/agent/route.ts      # 12-tool ReAct agent (Vercel serverless)
+│   │   │   ├── api/agent/route.ts      # 12-tool ReAct agent, bring-your-own-key (Vercel serverless)
 │   │   │   └── api/keepalive/route.ts  # Daily cron — stops Supabase pausing the project
 │   │   ├── components/pages/       # Client components (charts, agent UI, audit)
 │   │   └── lib/
 │   │       ├── data.ts             # Typed Supabase RPC wrappers
 │   │       └── supabase.ts         # Client init + TypeScript types
+│   ├── public/agent-runs/          # Recorded agent runs, replayed without a key
 │   └── next.config.ts              # Loads root .env via dotenv
 │
 ├── supabase/
 │   ├── config_tables.sql     # DDL + seed data for retention_playbook, business_config
 │   ├── rpc_functions.sql     # The 10 SECURITY DEFINER functions the dashboard calls
 │   └── rls_policies.sql      # Row-Level Security on all five tables
+│
+├── scripts/
+│   ├── readme_metrics.py     # Generates the Results section from the artifacts (--check in CI)
+│   └── record_agent_runs.py  # Records real agent runs for the keyless replay (--check verifies)
 │
 ├── restore_supabase.py       # Rebuilds the whole backend in dependency order, then verifies
 ├── migrate_to_supabase.py    # Creates `customers` and loads it from uplift.parquet
@@ -529,7 +571,7 @@ The Dockerfile uses `python:3.12-slim`, runs as a non-root user, and includes a 
 
 **The full system is deployed.** The Next.js dashboard is live on Vercel at [customer-segmentation-churn.vercel.app](https://customer-segmentation-churn.vercel.app/retention). The 12-tool AI agent runs as a Vercel serverless function (Next.js API route, 60-second timeout configured in `dashboard/vercel.json`). All data is served from Supabase. No separate backend deployment is needed — the dashboard is self-contained.
 
-Environment variables (Supabase keys, Groq API key, `CRON_SECRET`) are set directly on the Vercel project — the root `.env` trick that works locally doesn't apply in cloud deployments.
+Environment variables (Supabase keys, `CRON_SECRET`) are set directly on the Vercel project — the root `.env` trick that works locally doesn't apply in cloud deployments. `GROQ_API_KEY` is deliberately **not** among them: the hosted agent runs on the visitor's own key, so there is no shared quota to exhaust and no LLM credential on the deployment.
 
 **`SUPABASE_SERVICE_ROLE_KEY` is required, not optional.** RLS blocks inserts made
 with the anon key, so without it the agent still generates plans but every write
@@ -691,7 +733,8 @@ for, and it is not evidence of an effect size.
 - **No frontend test suite.** The Next.js dashboard has no automated tests. CI runs `tsc --noEmit` and ESLint on every push, so type errors and lint regressions are caught, but component behaviour is untested.
 - **Modest AUC, honestly reported.** Holdout AUC sits in the low 0.6s. Cell2Cell is a hard churn dataset and splitting it five ways makes it harder; the models are useful for ranking, not for confident individual predictions. The calibration is what makes the ranking safe to spend money against.
 - **The agent endpoint is public and rate-limited in memory.** `/api/agent` takes no auth so anyone opening the demo can use it, which also means anyone can spend the Groq free tier. A per-IP bucket in module scope blunts casual abuse but does not survive across serverless instances; a shared store (Vercel KV, Upstash) is the real fix if this ever mattered.
-- **Groq free-tier rate limits.** The AI agent uses Groq's free tier (100,000 tokens/day). Sustained multi-user usage would require a paid tier or model-switching logic.
+- **Hosted model names expire, and nothing in CI can catch it.** The agent was configured for `llama-3.3-70b-versatile` until Groq retired it, after which every request returned `404 model_not_found` and reached the browser as a generic 500 — for weeks, because no test exercises the live LLM path. The model name is a valid string in correct code that simply stopped existing. `AGENT_MODEL` now lives in one file with the check to run written above it, and the route reports a retired model as its own error rather than a crash.
+- **Groq free-tier rate limits still apply to your key.** A twelve-tool ReAct loop spends a lot of tokens at once, so a burst of requests can hit a per-minute limit. The route surfaces that immediately as a 429 with an explanation, rather than letting the SDK sit on it — its default retry, honouring Groq's `retry-after`, was observed hanging a request for **5.6 minutes**, which on Vercel is a function timeout with nothing to show.
 - **Single-tenant Supabase setup.** Row Level Security is enabled and the policies are version-controlled in `supabase/rls_policies.sql` (anon read-only + feedback insert; service-role for server-side writes). The current policies treat all data as a single shared tenant — multi-tenant use would require per-tenant scoping in the policy predicates.
 
 ---

@@ -1,0 +1,57 @@
+{
+  "id": "chat-3",
+  "mode": "chat",
+  "model": "openai/gpt-oss-120b",
+  "max_rounds": 5,
+  "answer_max_tokens": 4096,
+  "question": "Which persuadable customers have not been contacted yet? Give me the top five.",
+  "response": "Here are the top\u202f5\u202fpersuadable customers who haven\u2019t yet received a retention outreach, ordered by highest projected net ROI:\n\n| # | Customer ID | Segment | Churn Probability | Expected Uplift | Net ROI |\n|---|-------------|---------|-------------------|-----------------|---------|\n| 1 | **3225566** | Price Sensitive | 54.4\u202f% | 19.59\u202f% | **$82.95** |\n| 2 | **3363134** | Champions | 100\u202f% | 19.57\u202f% | **$82.85** |\n| 3 | **3002214** | Lapsed | 46.8\u202f% | 19.31\u202f% | **$81.55** |\n| 4 | **3344766** | Champions | 47.4\u202f% | 19.18\u202f% | **$80.91** |\n| 5 | **3001434** | Lapsed | 37.1\u202f% | 18.93\u202f% | **$79.64** |\n\nThese customers represent the highest\u2011ROI opportunities for a retention intervention right now. Let me know if you\u2019d like recommended intervention types for any of them or want to schedule actions.",
+  "trace": [
+    {
+      "round": 1,
+      "tool": "get_unactioned_persuadables",
+      "args": {
+        "limit": 5
+      },
+      "result": [
+        {
+          "customer_id": "3225566",
+          "segment": "Price Sensitive",
+          "churn_probability": "54.4%",
+          "uplift_score": "19.59%",
+          "net_roi": "$82.95"
+        },
+        {
+          "customer_id": "3363134",
+          "segment": "Champions",
+          "churn_probability": "100.0%",
+          "uplift_score": "19.57%",
+          "net_roi": "$82.85"
+        },
+        {
+          "customer_id": "3002214",
+          "segment": "Lapsed",
+          "churn_probability": "46.8%",
+          "uplift_score": "19.31%",
+          "net_roi": "$81.55"
+        },
+        {
+          "customer_id": "3344766",
+          "segment": "Champions",
+          "churn_probability": "47.4%",
+          "uplift_score": "19.18%",
+          "net_roi": "$80.91"
+        },
+        {
+          "customer_id": "3001434",
+          "segment": "Lapsed",
+          "churn_probability": "37.1%",
+          "uplift_score": "18.93%",
+          "net_roi": "$79.64"
+        }
+      ]
+    }
+  ],
+  "truncated": false,
+  "elapsed_seconds": 2.16
+}

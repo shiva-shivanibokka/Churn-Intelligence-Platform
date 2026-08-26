@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { PersuadableCustomer } from "@/lib/data";
 import { PageTitle, SectionHeading } from "@/components/ui/section-heading";
 import { MetricCard } from "@/components/ui/metric-card";
@@ -294,6 +294,137 @@ function renderToolResult(tool: string, result: Record<string, unknown>) {
   return <pre className="text-[11px] text-[#6B7280] whitespace-pre-wrap">{JSON.stringify(result, null, 2)}</pre>;
 }
 
+/**
+ * Just enough Markdown for what this agent actually emits.
+ *
+ * Asked to compare five segments, the model replies with a pipe table and bold
+ * headers — which was being rendered through `whitespace-pre-wrap`, so visitors
+ * read `| **Lapsed** | **33.3 %** |` as literal text. The answer was good and
+ * looked like debug output.
+ *
+ * This covers headings, bold, bullets and tables, which is the whole vocabulary
+ * in the recorded runs. It is not a Markdown parser and does not want to be —
+ * `react-markdown` plus a sanitiser is a real dependency for a formatting
+ * problem this size, and the input is one model's output in one component.
+ *
+ * Nothing here uses `dangerouslySetInnerHTML`. The text comes from a language
+ * model — with tool results from the database woven into it — so it is built
+ * into React elements, where it cannot become markup.
+ */
+function inline(text: string, keyPrefix: string) {
+  // Split on the delimiter rather than matching pairs: odd indices are the
+  // emphasised runs, which is true even when a stray `**` leaves one unclosed.
+  return text.split("**").map((part, i) =>
+    i % 2 === 1
+      ? <strong key={`${keyPrefix}-${i}`} className="font-bold text-[#1E1B4B]">{part}</strong>
+      : <span key={`${keyPrefix}-${i}`}>{part}</span>
+  );
+}
+
+function AgentMarkdown({ text }: { text: string }) {
+  const lines = (text ?? "").split("\n");
+  const blocks: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Table: a header row, a separator of dashes, then body rows.
+    if (line.trim().startsWith("|") && lines[i + 1]?.includes("---")) {
+      const cells = (row: string) =>
+        row.split("|").slice(1, -1).map((c) => c.trim());
+      const header = cells(line);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && lines[i].trim().startsWith("|")) {
+        rows.push(cells(lines[i]));
+        i++;
+      }
+      blocks.push(
+        <div key={`t-${i}`} className="overflow-x-auto my-3">
+          <table className="w-full text-[13px] border border-[#DDD6FE] rounded-lg overflow-hidden">
+            <thead>
+              <tr className="bg-[#F5F3FF]">
+                {header.map((h, hi) => (
+                  <th key={hi} className="text-left px-3 py-2 font-bold text-[#4F46E5] whitespace-nowrap">
+                    {inline(h, `h${hi}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, ri) => (
+                <tr key={ri} className="border-t border-[#EDE9FE]">
+                  {row.map((cell, ci) => (
+                    <td key={ci} className="px-3 py-2 text-[#1E1B4B] tabular-nums">
+                      {inline(cell, `c${ri}-${ci}`)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    if (line.startsWith("#")) {
+      const heading = line.replace(/^#+\s*/, "");
+      blocks.push(
+        <p key={`h-${i}`} className="text-[14px] font-bold text-[#1E1B4B] mt-3 mb-1">
+          {inline(heading, `hd${i}`)}
+        </p>
+      );
+      i++;
+      continue;
+    }
+
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-*]\s+/, ""));
+        i++;
+      }
+      blocks.push(
+        <ul key={`u-${i}`} className="list-disc pl-5 my-2 space-y-1">
+          {items.map((item, ii) => (
+            <li key={ii} className="text-[14px] text-[#1E1B4B] leading-relaxed">
+              {inline(item, `li${ii}`)}
+            </li>
+          ))}
+        </ul>
+      );
+      continue;
+    }
+
+    if (!line.trim()) {
+      i++;
+      continue;
+    }
+
+    // Consecutive non-blank lines are one paragraph.
+    const para: string[] = [];
+    while (
+      i < lines.length &&
+      lines[i].trim() &&
+      !lines[i].startsWith("#") &&
+      !lines[i].trim().startsWith("|") &&
+      !/^\s*[-*]\s+/.test(lines[i])
+    ) {
+      para.push(lines[i]);
+      i++;
+    }
+    blocks.push(
+      <p key={`p-${i}`} className="text-[14px] text-[#1E1B4B] leading-relaxed my-2">
+        {inline(para.join(" "), `pp${i}`)}
+      </p>
+    );
+  }
+
+  return <div>{blocks}</div>;
+}
+
 function AgentTrace({ trace, defaultOpen = false }: { trace: TraceStep[]; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   if (!trace || trace.length === 0) return null;
@@ -337,133 +468,208 @@ function AgentTrace({ trace, defaultOpen = false }: { trace: TraceStep[]; defaul
   );
 }
 
-export function RetentionClient({ persuadables }: Props) {
-  const [selectedId, setSelectedId] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [action, setAction] = useState<Action | null>(null);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [chatLoading, setChatLoading] = useState(false);
-  const [tab, setTab] = useState<"batch" | "chat">("batch");
+/**
+ * Where the visitor supplies their own Groq key.
+ *
+ * This deployment holds no Groq credential at all. A public agent endpoint
+ * backed by the owner's free tier is a 100k-token-a-day budget any visitor can
+ * finish, and once finished the feature is dead for everyone until the next
+ * reset — dead in a way that reads as "this project is broken". So the agent
+ * runs on the visitor's own key, which also means this project has no secret to
+ * leak, rotate, or pay for.
+ *
+ * The key is held in sessionStorage, not localStorage: it survives navigating
+ * between the dashboard's pages and disappears when the tab closes, which is
+ * the right lifetime for a credential someone pasted into a demo. It is sent as
+ * a request header and never as a query parameter — a key in a URL ends up in
+ * server access logs and browser history, where nobody thinks to clear it.
+ */
+const KEY_STORAGE = "churn-engine.groq-key";
 
-  const selected = useMemo(() => persuadables.find((c) => c.customer_id === selectedId), [persuadables, selectedId]);
+/**
+ * sessionStorage as an external store, read through useSyncExternalStore.
+ *
+ * The obvious approach — `useState("")` plus an effect that reads storage on
+ * mount — sets state during an effect and triggers a second render pass on
+ * every load. Reading it in a lazy initialiser instead is worse: the server
+ * renders an empty key and the client renders the stored one, which is a
+ * hydration mismatch.
+ *
+ * This is precisely what useSyncExternalStore is for. `getServerSnapshot`
+ * returns the empty string, so SSR and the first client paint agree, and React
+ * resubscribes to the real value immediately afterwards.
+ */
+const keyStore = {
+  listeners: new Set<() => void>(),
 
-  async function generateAction() {
-    if (!selected) return;
-    setLoading(true);
-    setAction(null);
+  read(): string {
     try {
-      const res = await fetch("/api/agent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "batch", customer: selected }),
-      });
-      const data = await res.json();
-      const plan = data.action ?? { error: data.error };
-      if (data.save_error) plan.save_error = data.save_error;
-      setAction(plan);
-    } catch (e) {
-      setAction({ customer_id: selectedId, segment: "", churn_probability: 0, uplift_score: 0, net_roi: 0, error: String(e) });
+      return window.sessionStorage.getItem(KEY_STORAGE) ?? "";
+    } catch {
+      // Private browsing and blocked storage: the panel still works, the key
+      // just does not survive navigating between pages.
+      return "";
     }
-    setLoading(false);
-  }
+  },
 
-  async function sendChat() {
-    if (!chatInput.trim()) return;
-    const userMsg: ChatMessage = { role: "user", content: chatInput };
-    const history = [...chatMessages, userMsg];
-    setChatMessages(history);
-    setChatInput("");
-    setChatLoading(true);
+  write(value: string) {
     try {
-      const res = await fetch("/api/agent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "chat", message: chatInput, history: chatMessages.map(({ role, content }) => ({ role, content })) }),
-      });
-      const data = await res.json();
-      const aiMsg: ChatMessage = {
-        role: "assistant",
-        content: data.response ?? data.error ?? "No response.",
-        trace: data.trace?.length ? data.trace : undefined,
-      };
-      setChatMessages([...history, aiMsg]);
-    } catch (e) {
-      setChatMessages([...history, { role: "assistant", content: `Error: ${e}` }]);
+      if (value) window.sessionStorage.setItem(KEY_STORAGE, value);
+      else window.sessionStorage.removeItem(KEY_STORAGE);
+    } catch {
+      // Non-fatal — see above.
     }
-    setChatLoading(false);
-  }
+    for (const listener of this.listeners) listener();
+  },
 
+  subscribe(listener: () => void) {
+    keyStore.listeners.add(listener);
+    // Another tab clearing the key should clear it here too.
+    window.addEventListener("storage", listener);
+    return () => {
+      keyStore.listeners.delete(listener);
+      window.removeEventListener("storage", listener);
+    };
+  },
+};
+
+function useGroqKey(): [string, (key: string) => void] {
+  const key = useSyncExternalStore(
+    keyStore.subscribe,
+    () => keyStore.read(),
+    () => "",
+  );
+  const setKey = useCallback((value: string) => keyStore.write(value), []);
+  return [key, setKey];
+}
+
+function ApiKeyPanel({
+  apiKey,
+  onChange,
+  invalid,
+}: {
+  apiKey: string;
+  onChange: (key: string) => void;
+  invalid: boolean;
+}) {
+  const [draft, setDraft] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const configured = apiKey.length > 0;
+  const masked = configured ? `gsk_••••••••${apiKey.slice(-4)}` : "";
+
+  // Collapsed once a key is in place: it is setup, not a control the visitor
+  // needs in front of them while working.
+  const expanded = open || !configured || invalid;
+
+  return (
+    <div
+      className={`rounded-2xl border-2 mb-6 overflow-hidden ${
+        invalid ? "border-[#FECACA] bg-[#FEF2F2]" : configured ? "border-[#DDD6FE] bg-white" : "border-[#FDE68A] bg-[#FFFBEB]"
+      }`}
+    >
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-3 px-5 py-3.5 text-left"
+        aria-expanded={expanded}
+      >
+        <span className="flex items-center gap-2.5 text-[14px] font-bold text-[#1E1B4B]">
+          <span aria-hidden="true">{configured && !invalid ? "🔑" : "⚠️"}</span>
+          {configured && !invalid
+            ? <>Using your Groq key <span className="font-mono font-normal text-[13px] text-[#6B7280]">{masked}</span></>
+            : "The AI agent needs your Groq API key"}
+        </span>
+        <span className="text-[12px] font-semibold text-[#6366F1] shrink-0">
+          {expanded ? "Hide" : "Change"}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="px-5 pb-5 pt-1">
+          <p className="text-[13px] text-[#4B5563] leading-relaxed mb-3">
+            This demo deliberately ships without a Groq key of its own. A shared free
+            tier is 100,000 tokens a day for every visitor combined, so the first
+            person to hold down the button turns the agent off for everyone else.
+            Bringing your own means the agent is never queued behind a stranger.{" "}
+            <a
+              href="https://console.groq.com/keys"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-[#4F46E5] underline underline-offset-2"
+            >
+              Groq keys are free
+            </a>{" "}
+            and take about a minute to create.
+          </p>
+
+          <p className="text-[12px] text-[#6B7280] leading-relaxed mb-3">
+            Your key is kept in this browser tab only, sent as a request header to
+            this site&rsquo;s own agent route, and forwarded to Groq. It is never
+            stored on the server, never written to the database, never logged, and
+            never placed in a URL. Close the tab and it is gone. The other four
+            dashboard pages need no key at all.
+          </p>
+
+          <div className="flex gap-2 flex-wrap items-center">
+            <input
+              type="password"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && draft.trim()) {
+                  onChange(draft.trim());
+                  setDraft("");
+                  setOpen(false);
+                }
+              }}
+              placeholder="gsk_…"
+              autoComplete="off"
+              spellCheck={false}
+              aria-label="Groq API key"
+              className="flex-1 min-w-[240px] rounded-xl border-2 border-[#818CF8] bg-white px-4 py-2.5 text-[14px] font-mono text-[#1E1B4B] focus:outline-none focus:border-[#4F46E5]"
+            />
+            <button
+              onClick={() => { onChange(draft.trim()); setDraft(""); setOpen(false); }}
+              disabled={!draft.trim()}
+              className="px-5 py-2.5 rounded-xl font-bold text-[14px] text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: "linear-gradient(135deg, #6366F1, #4338CA)" }}
+            >
+              Use this key
+            </button>
+            {configured && (
+              <button
+                onClick={() => { onChange(""); setDraft(""); }}
+                className="px-4 py-2.5 rounded-xl font-semibold text-[14px] text-[#6B7280] border-2 border-[#DDD6FE] bg-white hover:border-[#818CF8]"
+              >
+                Forget it
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The generated plan, its reasoning trace, and the failure states around them.
+ *
+ * Extracted so the replay tab renders a recorded run through exactly the same
+ * markup as a live one. A replay that looks different from the thing it is
+ * replaying is a second implementation to keep in step, and it invites the
+ * reasonable suspicion that the recording is a mock-up rather than a real run.
+ */
+function PlanResult({ action, heading = "AI-Generated Retention Plan" }: { action: Action | null; heading?: string }) {
   const confidenceColor = (c?: string) =>
     c === "High" ? "#10B981" : c === "Medium" ? "#F59E0B" : "#EF4444";
 
+  if (!action) return null;
+
   return (
-    <div>
-      <PageTitle>Retention Actions</PageTitle>
-
-      <div className="flex gap-2 mb-6">
-        {(["batch", "chat"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-5 py-2 rounded-xl font-semibold text-[14px] transition-all ${
-              tab === t
-                ? "text-white shadow-lg"
-                : "bg-white border-2 border-[#DDD6FE] text-[#6B7280] hover:border-[#818CF8]"
-            }`}
-            style={tab === t ? { background: "linear-gradient(135deg, #6366F1, #4338CA)" } : {}}
-          >
-            {t === "batch" ? "Generate Action Plan" : "Ask AI Assistant"}
-          </button>
-        ))}
-      </div>
-
-      {tab === "batch" && (
-        <div className="space-y-6">
-          {/* Customer selector */}
-          <SectionHeading>Select a Customer</SectionHeading>
-          <div className="flex gap-3 flex-wrap items-end">
-            <div className="flex-1 min-w-[260px]">
-              <label className="block text-[13px] font-semibold text-[#4F46E5] mb-1.5">
-                Customer ID — showing top Persuadables by ROI
-              </label>
-              <select
-                value={selectedId}
-                onChange={(e) => { setSelectedId(e.target.value); setAction(null); }}
-                className="w-full rounded-xl border-2 border-[#818CF8] bg-white px-4 py-3 text-[14px] text-[#1E1B4B] font-medium focus:outline-none focus:border-[#4F46E5] min-h-[48px]"
-              >
-                <option value="">— Select customer —</option>
-                {persuadables.map((c) => (
-                  <option key={c.customer_id} value={c.customer_id}>
-                    {c.customer_id} | {c.segment} | Churn {(c.churn_probability * 100).toFixed(1)}% | ROI ${c.net_roi.toFixed(0)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button
-              onClick={generateAction}
-              disabled={!selectedId || loading}
-              className="px-6 py-3 rounded-xl font-bold text-[14px] text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:-translate-y-0.5"
-              style={{ background: "linear-gradient(135deg, #6366F1, #4338CA)", boxShadow: "0 4px 16px rgba(79,70,229,0.4)" }}
-            >
-              {loading ? "Generating…" : "Generate Plan"}
-            </button>
-          </div>
-
-          {/* Customer summary cards */}
-          {selected && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <MetricCard label="Churn Probability" value={`${(selected.churn_probability * 100).toFixed(1)}%`} accentColor="#EF4444" />
-              <MetricCard label="Uplift Score" value={`${selected.uplift_score >= 0 ? "+" : ""}${(selected.uplift_score * 100).toFixed(2)}%`} accentColor="#4F46E5" />
-              <MetricCard label="Net ROI" value={`$${selected.net_roi.toFixed(2)}`} accentColor="#10B981" />
-              <MetricCard label="Customer Type" value={selected.customer_type} accentColor="#7C3AED" />
-            </div>
-          )}
-
-          {/* Action card */}
-          {action && !action.error && !action.do_not_intervene_reason && (
+    <>
+          {!action.error && !action.do_not_intervene_reason && (
             <div>
-              <SectionHeading>AI-Generated Retention Plan</SectionHeading>
+              <SectionHeading>{heading}</SectionHeading>
               {action.save_error && (
                 <div className="mb-4 rounded-xl border-2 border-[#FCD34D] bg-[#FFFBEB] px-4 py-3 text-[13px] text-[#92400E]">
                   <b>This plan was not recorded.</b> It is shown below and is
@@ -510,18 +716,352 @@ export function RetentionClient({ persuadables }: Props) {
             </div>
           )}
 
-          {action?.do_not_intervene_reason && (
+          {action.do_not_intervene_reason && (
             <div className="bg-[#FEF2F2] border-2 border-[#FECACA] rounded-2xl p-5">
               <p className="font-bold text-[#EF4444] mb-1">Do Not Intervene</p>
               <p className="text-[14px] text-[#7F1D1D]">{action.do_not_intervene_reason}</p>
             </div>
           )}
 
-          {action?.error && (
+          {action.error && (
             <div className="bg-[#FEF2F2] border-2 border-[#FECACA] rounded-2xl p-5">
               <p className="font-bold text-[#EF4444]">Error: {action.error}</p>
             </div>
           )}
+    </>
+  );
+}
+
+/**
+ * Recorded agent runs, for visitors without a Groq key.
+ *
+ * These are not mock-ups. Each one is a real call to this same `/api/agent`
+ * route, made against the live Supabase data with a real key, captured by
+ * `scripts/record_agent_runs.py` and committed as static JSON — the tool calls
+ * happened, the numbers came out of the database, and the model wrote the
+ * words. They render through the same components a live run does, so what a
+ * visitor watches here is what they would get by pasting a key in.
+ *
+ * The alternative was leaving the agent behind a key prompt, which for anyone
+ * evaluating the project in three minutes is indistinguishable from leaving it
+ * broken.
+ */
+type ReplayIndexEntry = {
+  id: string;
+  mode: "batch" | "chat";
+  label: string;
+  tool_calls: number;
+  elapsed_seconds: number;
+};
+
+type ReplayRun = {
+  id: string;
+  mode: "batch" | "chat";
+  model: string;
+  customer?: PersuadableCustomer;
+  action?: Action | null;
+  question?: string;
+  response?: string;
+  trace: TraceStep[];
+  elapsed_seconds: number;
+};
+
+function ReplayTab() {
+  const [index, setIndex] = useState<ReplayIndexEntry[] | null>(null);
+  const [model, setModel] = useState("");
+  const [selected, setSelected] = useState<ReplayRun | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [started, setStarted] = useState(false);
+
+  const loadIndex = useCallback(async () => {
+    try {
+      const res = await fetch("/agent-runs/index.json");
+      if (!res.ok) throw new Error(res.status + " " + res.statusText);
+      const data = await res.json();
+      setModel(data.model ?? "");
+      setIndex(data.runs ?? []);
+    } catch (e) {
+      // Say the recordings are missing rather than rendering an empty picker,
+      // which reads as "there is nothing to show" instead of "this failed".
+      setLoadError(String(e));
+      setIndex([]);
+    }
+  }, []);
+
+  const openRun = useCallback(async (id: string) => {
+    setBusy(true);
+    setLoadError(null);
+    try {
+      const res = await fetch("/agent-runs/" + id + ".json");
+      if (!res.ok) throw new Error(res.status + " " + res.statusText);
+      setSelected(await res.json());
+    } catch (e) {
+      setLoadError(String(e));
+      setSelected(null);
+    }
+    setBusy(false);
+  }, []);
+
+  if (!started) {
+    return (
+      <div className="rounded-2xl border-2 border-[#DDD6FE] bg-[#F5F3FF] px-5 py-6 text-center">
+        <p className="text-[14px] text-[#4B5563] mb-4">
+          Six agent runs were recorded against the live database and committed to
+          this repository. No key required.
+        </p>
+        <button
+          onClick={() => { setStarted(true); void loadIndex(); }}
+          className="px-6 py-3 rounded-xl font-bold text-[14px] text-white"
+          style={{ background: "linear-gradient(135deg, #6366F1, #4338CA)" }}
+        >
+          Load recorded runs
+        </button>
+      </div>
+    );
+  }
+
+  if (index === null) {
+    return <p className="text-[14px] text-[#6B7280]">Loading recorded runs…</p>;
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-2xl border-2 border-[#DDD6FE] bg-[#F5F3FF] px-5 py-4">
+        <p className="text-[14px] font-bold text-[#1E1B4B] mb-1.5">
+          Real runs, recorded — no key needed
+        </p>
+        <p className="text-[13px] text-[#4B5563] leading-relaxed">
+          Every run below is an actual call to this dashboard&rsquo;s agent route, made
+          against the live database{model ? <> with <span className="font-mono text-[12px]">{model}</span></> : null} and
+          committed to the repository. The tool calls happened, the figures came out
+          of Supabase, and the model wrote the text. Nothing here is a mock-up — it
+          renders through the same components a live run does. Add your own key on
+          the other two tabs to run fresh ones.
+        </p>
+      </div>
+
+      {loadError && (
+        <div className="rounded-2xl border-2 border-[#FECACA] bg-[#FEF2F2] px-5 py-4 text-[13px] text-[#7F1D1D]">
+          <b>Could not load the recordings.</b> {loadError}
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        {index.map((run) => (
+          <button
+            key={run.id}
+            onClick={() => openRun(run.id)}
+            className={
+              "text-left px-4 py-3 rounded-xl border-2 transition-all max-w-[340px] " +
+              (selected?.id === run.id
+                ? "border-[#4F46E5] bg-white shadow-md"
+                : "border-[#DDD6FE] bg-white hover:border-[#818CF8]")
+            }
+          >
+            <span className="block text-[11px] font-bold uppercase tracking-wide text-[#7C3AED] mb-0.5">
+              {run.mode === "batch" ? "Retention plan" : "Question"}
+            </span>
+            <span className="block text-[13px] font-semibold text-[#1E1B4B] leading-snug">
+              {run.label}
+            </span>
+            <span className="block text-[11px] text-[#6B7280] mt-1 tabular-nums">
+              {run.tool_calls} tool call{run.tool_calls === 1 ? "" : "s"} · {run.elapsed_seconds.toFixed(1)}s
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {busy && <p className="text-[14px] text-[#6B7280]">Loading run…</p>}
+
+      {selected && !busy && (
+        <div className="space-y-6">
+          {selected.mode === "batch" && selected.customer && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <MetricCard label="Churn Probability" value={(selected.customer.churn_probability * 100).toFixed(1) + "%"} accentColor="#EF4444" />
+              <MetricCard label="Uplift Score" value={(selected.customer.uplift_score >= 0 ? "+" : "") + (selected.customer.uplift_score * 100).toFixed(2) + "%"} accentColor="#4F46E5" />
+              <MetricCard label="Net ROI" value={"$" + selected.customer.net_roi.toFixed(2)} accentColor="#10B981" />
+              <MetricCard label="Customer Type" value={selected.customer.customer_type} accentColor="#7C3AED" />
+            </div>
+          )}
+
+          {selected.mode === "batch" && (
+            <PlanResult action={selected.action ?? null} heading="Recorded Retention Plan" />
+          )}
+
+          {selected.mode === "chat" && (
+            <div>
+              <SectionHeading>Recorded Conversation</SectionHeading>
+              <div className="rounded-2xl border-2 border-[#DDD6FE] bg-white p-5 space-y-4">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-[#7C3AED] mb-1">Question</p>
+                  <p className="text-[14px] text-[#1E1B4B]">{selected.question}</p>
+                </div>
+                <AgentTrace trace={selected.trace} defaultOpen />
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-[#7C3AED] mb-1">Answer</p>
+                  <AgentMarkdown text={selected.response ?? ""} />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function RetentionClient({ persuadables }: Props) {
+  const [selectedId, setSelectedId] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [action, setAction] = useState<Action | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [tab, setTab] = useState<"batch" | "chat" | "replay">("replay");
+  const [apiKey, setApiKey] = useGroqKey();
+  const [keyRejected, setKeyRejected] = useState(false);
+
+  const updateKey = useCallback((key: string) => {
+    setApiKey(key);
+    // A newly supplied key deserves a fresh verdict; leaving the rejection up
+    // would keep the panel red after the visitor fixed the problem.
+    setKeyRejected(false);
+  }, [setApiKey]);
+
+  /**
+   * The agent route requires the visitor's own key, so it goes in a header.
+   *
+   * Not a query parameter and not the request body: headers are the one place a
+   * credential does not get written to a server access log or left in the
+   * browser's history.
+   */
+  const agentHeaders = useCallback((): HeadersInit => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers["x-groq-key"] = apiKey;
+    return headers;
+  }, [apiKey]);
+
+  const selected = useMemo(() => persuadables.find((c) => c.customer_id === selectedId), [persuadables, selectedId]);
+
+  async function generateAction() {
+    if (!selected) return;
+    setLoading(true);
+    setAction(null);
+    try {
+      const res = await fetch("/api/agent", {
+        method: "POST",
+        headers: agentHeaders(),
+        body: JSON.stringify({ mode: "batch", customer: selected }),
+      });
+      const data = await res.json();
+      if (data.needs_key || data.invalid_key) setKeyRejected(true);
+      const plan = data.action ?? { error: data.error };
+      if (data.save_error) plan.save_error = data.save_error;
+      setAction(plan);
+    } catch (e) {
+      setAction({ customer_id: selectedId, segment: "", churn_probability: 0, uplift_score: 0, net_roi: 0, error: String(e) });
+    }
+    setLoading(false);
+  }
+
+  async function sendChat() {
+    if (!chatInput.trim()) return;
+    const userMsg: ChatMessage = { role: "user", content: chatInput };
+    const history = [...chatMessages, userMsg];
+    setChatMessages(history);
+    setChatInput("");
+    setChatLoading(true);
+    try {
+      const res = await fetch("/api/agent", {
+        method: "POST",
+        headers: agentHeaders(),
+        body: JSON.stringify({ mode: "chat", message: chatInput, history: chatMessages.map(({ role, content }) => ({ role, content })) }),
+      });
+      const data = await res.json();
+      if (data.needs_key || data.invalid_key) setKeyRejected(true);
+      const aiMsg: ChatMessage = {
+        role: "assistant",
+        content: data.response ?? data.error ?? "No response.",
+        trace: data.trace?.length ? data.trace : undefined,
+      };
+      setChatMessages([...history, aiMsg]);
+    } catch (e) {
+      setChatMessages([...history, { role: "assistant", content: `Error: ${e}` }]);
+    }
+    setChatLoading(false);
+  }
+
+  return (
+    <div>
+      <PageTitle>Retention Actions</PageTitle>
+
+      {tab !== "replay" && (
+        <ApiKeyPanel apiKey={apiKey} onChange={updateKey} invalid={keyRejected} />
+      )}
+
+      <div className="flex gap-2 mb-6">
+        {(["replay", "batch", "chat"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-5 py-2 rounded-xl font-semibold text-[14px] transition-all ${
+              tab === t
+                ? "text-white shadow-lg"
+                : "bg-white border-2 border-[#DDD6FE] text-[#6B7280] hover:border-[#818CF8]"
+            }`}
+            style={tab === t ? { background: "linear-gradient(135deg, #6366F1, #4338CA)" } : {}}
+          >
+            {t === "replay" ? "Watch a Recorded Run" : t === "batch" ? "Generate Action Plan" : "Ask AI Assistant"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "replay" && <ReplayTab />}
+
+      {tab === "batch" && (
+        <div className="space-y-6">
+          {/* Customer selector */}
+          <SectionHeading>Select a Customer</SectionHeading>
+          <div className="flex gap-3 flex-wrap items-end">
+            <div className="flex-1 min-w-[260px]">
+              <label className="block text-[13px] font-semibold text-[#4F46E5] mb-1.5">
+                Customer ID — showing top Persuadables by ROI
+              </label>
+              <select
+                value={selectedId}
+                onChange={(e) => { setSelectedId(e.target.value); setAction(null); }}
+                className="w-full rounded-xl border-2 border-[#818CF8] bg-white px-4 py-3 text-[14px] text-[#1E1B4B] font-medium focus:outline-none focus:border-[#4F46E5] min-h-[48px]"
+              >
+                <option value="">— Select customer —</option>
+                {persuadables.map((c) => (
+                  <option key={c.customer_id} value={c.customer_id}>
+                    {c.customer_id} | {c.segment} | Churn {(c.churn_probability * 100).toFixed(1)}% | ROI ${c.net_roi.toFixed(0)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={generateAction}
+              disabled={!selectedId || loading}
+              className="px-6 py-3 rounded-xl font-bold text-[14px] text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:-translate-y-0.5"
+              style={{ background: "linear-gradient(135deg, #6366F1, #4338CA)", boxShadow: "0 4px 16px rgba(79,70,229,0.4)" }}
+            >
+              {loading ? "Generating…" : "Generate Plan"}
+            </button>
+          </div>
+
+          {/* Customer summary cards */}
+          {selected && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <MetricCard label="Churn Probability" value={`${(selected.churn_probability * 100).toFixed(1)}%`} accentColor="#EF4444" />
+              <MetricCard label="Uplift Score" value={`${selected.uplift_score >= 0 ? "+" : ""}${(selected.uplift_score * 100).toFixed(2)}%`} accentColor="#4F46E5" />
+              <MetricCard label="Net ROI" value={`$${selected.net_roi.toFixed(2)}`} accentColor="#10B981" />
+              <MetricCard label="Customer Type" value={selected.customer_type} accentColor="#7C3AED" />
+            </div>
+          )}
+
+          <PlanResult action={action} />
         </div>
       )}
 
@@ -552,7 +1092,9 @@ export function RetentionClient({ persuadables }: Props) {
                   {m.role === "user" ? "You" : "AI Assistant"}
                 </p>
                 {m.role === "assistant" && m.trace && <AgentTrace trace={m.trace} />}
-                <p className="text-[#1E1B4B] whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                {m.role === "assistant"
+                  ? <AgentMarkdown text={m.content} />
+                  : <p className="text-[#1E1B4B] whitespace-pre-wrap leading-relaxed">{m.content}</p>}
               </div>
             ))}
             {chatLoading && (

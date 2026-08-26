@@ -38,6 +38,13 @@ jobs:
         # stops matching.
         run: python scripts/readme_metrics.py --check
 
+      - name: Verify the recorded agent runs
+        # These are served to the public, so they must not carry a key, and a
+        # recording that says "Could not parse agent response" is worse than no
+        # recording — the check that let two of those through only tested that
+        # the action field was truthy, and an error dict is truthy.
+        run: python scripts/record_agent_runs.py --check
+
   dashboard:
     # The dashboard is the deployed half of this project and had no CI at all —
     # a type error or a broken import only showed up when Vercel failed a build
