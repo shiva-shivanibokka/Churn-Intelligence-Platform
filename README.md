@@ -15,7 +15,8 @@
 
 - **What it does:** Segments customers behaviorally, predicts churn per cohort with calibrated probabilities, identifies the subset worth spending retention budget on (uplift modeling), and deploys a 12-tool ReAct AI agent that reasons over SHAP drivers, intervention history, and ROI before generating and saving a personalized retention plan.
 - **Hardest problem solved:** Replacing a naive "email everyone above 0.7 churn probability" approach with causal uplift modeling (CausalML T-Learner + S-Learner) to distinguish Persuadables from Lost Causes and Sleeping Dogs — the same targeting logic Uber open-sourced CausalML to solve.
-- **Verified results from pipeline runs:** AUC 0.789–0.859 across 5 segments; cluster stability mean ARI = 0.886 across 100 bootstrap resamplings; 798 Persuadables identified from 39,725 high-risk customers on the Cell2Cell dataset.
+- **Verified results, generated from the artifacts rather than typed:** holdout AUC 0.576–0.692 across 5 segments; isotonic calibration cutting held-out Brier from 0.2342 to 0.1946; cluster stability mean ARI 0.915 over 100 seeded bootstrap resamplings; 7,602 Persuadables on the Cell2Cell dataset. Every one of those figures is written by `scripts/readme_metrics.py` and re-checked in CI — see [Results](#results).
+- **The bug worth reading about:** the uplift score's sign was inverted, so for months the "Persuadables" this system recommended contacting were precisely the customers its own model predicted contact would drive away. It produced a ranked list, plausible ROI and a working dashboard the entire time. [What happened, and the check that now runs every pipeline](#results).
 
 ---
 
@@ -37,8 +38,8 @@ Raw behavioral data (3 supported datasets)
   → 8 engineered composite features
   → K-Means++ segmentation + GMM soft probability assignments
   → Bootstrap ARI stability validation (100 resamplings)
-  → Per-segment CatBoost classifiers + isotonic calibration
-  → Gain-based feature importance (per-customer SHAP approximation)
+  → Per-segment CatBoost classifiers, early-stopped + isotonic calibration
+  → Exact CatBoost TreeSHAP, per customer, signed
   → CausalML T-Learner + S-Learner uplift modeling
   → Four-quadrant customer classification (Persuadable / Sure Thing / Lost Cause / Sleeping Dog)
   → Intervention ROI ranking (uplift × CLV − cost)
@@ -90,7 +91,9 @@ flowchart TD
 **Why it's shaped this way:**
 
 - **Per-segment models over a global model.** A Champion and a Lapsed customer churn for fundamentally different reasons. Separate CatBoost classifiers per cohort capture segment-specific dynamics. This mirrors Salesforce Einstein's per-tier health scoring.
-- **Isotonic calibration over raw probabilities.** Raw CatBoost output is not well-calibrated — a score of 0.7 ≠ 70% actual churn rate. Calibration is required whenever probabilities drive financial calculations (CLV, retention ROI, budget allocation). Isotonic regression is preferred over Platt scaling for non-parametric distributions.
+- **Isotonic calibration over raw probabilities.** These models are trained with `class_weights=[1, pos_weight]` to handle imbalance, which inflates the positive class *by construction* — so a raw score of 0.7 is not a 70% chance of churn. That matters because the score is then multiplied by CLV to rank retention spend, which is exactly the case where an uncalibrated probability costs money. Isotonic is fitted on a held-out slice and preferred over Platt scaling for non-parametric distributions.
+
+  The claim used to be false. `calibrated_clf` was a plain alias for the base model, on the reasoning that CatBoost is well calibrated natively — which ignores the class weighting, and which nothing checked because every call site read `model_dict["calibrated_clf"]` and so looked calibrated either way. `holdout_brier_uncalibrated` and `holdout_brier` are now both recorded, so it is a measurement.
 - **Observational uplift instead of A/B targeting.** The datasets don't include historical experiment logs. Treatment proxies (`Complain` flag = received support outreach; `CouponUsed > 0` = received discount) follow the academic literature on observational uplift. Production systems (Uber, Netflix) train on actual randomized experiment logs.
 - **Server-side retention action saves.** The `retention_actions` table has Row Level Security enabled in Supabase. The AI agent API route uses the service role key (server-side only) for inserts — the browser anon key is read-only.
 - **DB-driven agent configuration.** The system prompt is rebuilt from the `business_config` table on every request. Changing CLV assumptions, intervention types, or outreach channels requires only a database row update — no code change, no redeploy.
@@ -102,11 +105,11 @@ flowchart TD
 **ML Pipeline**
 - 8 engineered composite features: `EngagementScore`, `RecencySignal`, `StickinessIndex`, `SpendTrend`, `SupportRiskScore`, `DiscountSensitivity`, `TenureStability`, `WarehouseFriction`
 - Schema validation with column presence and missing-rate checks before any transformation
-- Supports 3 datasets selectable via `--dataset` CLI flag: e-commerce (5,630 customers), Olist Brazilian marketplace (42,325), Cell2Cell telecom (~51,000)
+- Supports 3 datasets selectable via `--dataset` CLI flag: e-commerce (5,630 customers), Olist Brazilian marketplace (42,325), Cell2Cell telecom (51,047). Cached artifacts record which dataset built them, so switching datasets rebuilds rather than silently returning the previous one
 - K-Means++ with 5 clusters + GMM soft probability assignments (each customer gets a probability distribution across segments, not just a hard label)
 - Bootstrap cluster stability: Adjusted Rand Index across 100 resamplings with a pass/warn/fail grading scheme
-- Per-segment CatBoost classifiers with stratified 80/20 holdout and 5-fold cross-validation
-- Isotonic probability calibration for reliable downstream ROI calculations
+- Per-segment CatBoost classifiers with a stratified 80/20 holdout, 3-fold CV, and early stopping against the calibration slice
+- Isotonic probability calibration fitted on a held-out slice, with the before/after Brier recorded per segment
 - MLflow experiment tracking — one run logged per segment per training
 - CausalML T-Learner + S-Learner uplift models with four-quadrant customer classification
 - Intervention ROI ranking: `net_roi = uplift_score × CLV − intervention_cost`
@@ -114,7 +117,7 @@ flowchart TD
 **FastAPI Scoring Endpoint**
 - `GET /health` — liveness probe
 - `GET /readiness` — readiness probe (confirms model artifacts loaded)
-- `POST /score` — accepts raw customer features, returns `segment`, `churn_probability`, `risk_tier`, `customer_type`
+- `POST /score` — accepts raw customer features, returns `segment` (from the trained K-Means model), `churn_probability` (calibrated, from that segment's own classifier), `risk_tier`, `customer_type` (from the fitted uplift learners) and `trained_on`
 - Input validated with Pydantic; returns 422 on missing or out-of-range fields
 
 **Next.js Dashboard (5 pages)**
@@ -231,7 +234,7 @@ python src/pipeline.py --force
 
 # Run on a different dataset:
 python src/pipeline.py --dataset olist      # Brazilian e-commerce, 42K customers
-python src/pipeline.py --dataset cell2cell  # Telecom churn, ~71K customers
+python src/pipeline.py --dataset cell2cell  # Telecom churn, 51,047 customers
 ```
 
 Artifacts are cached to `data/processed/` and `models/`. Subsequent runs without `--force` load from cache in seconds.
@@ -280,6 +283,10 @@ uvicorn api.serve:app --host 0.0.0.0 --port 8000
 # Liveness check:
 curl http://localhost:8000/health
 # → {"status": "ok"}
+
+# Readiness — reports what it is ready to serve, not just 200:
+curl http://localhost:8000/readiness
+# → {"status":"ready","trained_on":"cell2cell","segments":[...],"uplift_available":true}
 
 # Score a customer:
 curl -X POST http://localhost:8000/score \
@@ -330,15 +337,16 @@ CRON_SECRET=any-long-random-string
 
 ```
 [Stage 1] Feature Engineering — 51,047 customers, 8 composite features
-[Stage 2] Segmentation — k=5, stability mean ARI=0.886 (Highly Stable)
-[Stage 3] Churn Prediction — per-segment CatBoost, AUC 0.789–0.859
-[Stage 4] Uplift Modeling — 798 Persuadables, 38,927 Lost Causes
+[Stage 2] Segmentation — k=5, stability mean ARI=0.915 (Highly Stable)
+[Stage 3] Churn Prediction — per-segment CatBoost, holdout AUC 0.576–0.692
+[Stage 4] Uplift Modeling — 7,602 Persuadables, 18,222 Lost Causes
+          Uplift direction check passed — treated top decile churns 0.255 vs bottom 0.425
 
 CustomerType distribution:
-  Lost Cause      38,927
-  Sleeping Dog    11,088
-  Persuadable        798
-  Sure Thing         234
+  Sleeping Dog      22,492
+  Lost Cause        18,222
+  Persuadable        7,602
+  Sure Thing         2,731
 ```
 
 **Classify a customer programmatically (from `uplift_model.py`):**
@@ -375,13 +383,34 @@ curl -X POST http://localhost:8000/score \
 
 ```json
 {
-  "segment": "Loyal Customers",
-  "churn_probability": 0.21,
+  "segment": "At-Risk",
+  "churn_probability": 0.3176,
   "churn_prediction": 0,
-  "risk_tier": "Low Risk",
-  "customer_type": "Sure Thing"
+  "risk_tier": "Medium Risk",
+  "customer_type": "Lost Cause",
+  "uplift_score": -0.1045,
+  "trained_on": "cell2cell",
+  "model_version": "2.0.0"
 }
 ```
+
+That is copied from an actual call against the committed artifacts, which is
+worth saying because the block that used to sit here was not. It showed
+`"segment": "Loyal Customers"` and `"customer_type": "Sure Thing"`, and the
+endpoint could produce neither: it computed the K-Means cluster and then
+discarded it in favour of `list(segment_models)[0]`, so every customer came back
+"Champions", and it passed a hardcoded `uplift_score=0.0` into the classifier,
+which sits below the Persuadable threshold and left only the two negative-uplift
+quadrants reachable. Both are fixed, and `tests/test_api.py` now asserts that
+each cluster maps to its own segment and that all four quadrants are reachable —
+the previous fixture had exactly one segment in it, which is why nothing caught
+either.
+
+**`trained_on` matters when reading the numbers.** The request fields are named
+for the e-commerce schema, but the committed artifacts are trained on Cell2Cell,
+where those names carry proxy meanings — `DaySinceLastOrder` is days on the
+current handset, `Complain` is more than three care calls, `SatisfactionScore`
+is a credit rating. The mapping is in `src/cell2cell_features.py`.
 
 ---
 
@@ -557,22 +586,101 @@ in the segmentation blurb are now counted from the rows actually returned.
 
 ## Results
 
-All numbers below come from running the pipeline on the Cell2Cell dataset (51,047 customers). They are reproducible by running `python src/pipeline.py --dataset cell2cell`.
+<!-- BEGIN GENERATED RESULTS -->
+<!-- Generated by scripts/readme_metrics.py — do not edit by hand.
+     Run `python scripts/readme_metrics.py --write` after any pipeline run. -->
 
-| Metric | Value |
+All figures below are read straight out of the committed artifacts by
+`scripts/readme_metrics.py`, which CI re-runs in `--check` mode. If a model
+changes and this section is not regenerated, the build fails. Dataset:
+**cell2cell**, 51,047 customers.
+
+### Per-segment churn models
+
+| Segment | Customers | Churn rate | Holdout AUC | Train AUC | Holdout Brier (raw → calibrated) | Trees |
+|---|---|---|---|---|---|---|
+| At-Risk | 8,400 | 26.4% | **0.692** | 0.726 | 0.2197 → 0.1778 | 64 |
+| Price Sensitive | 12,966 | 30.0% | **0.645** | 0.691 | 0.2327 → 0.2001 | 39 |
+| Loyal Customers | 9,553 | 28.0% | **0.614** | 0.672 | 0.2368 → 0.1955 | 26 |
+| Champions | 8,153 | 23.9% | **0.591** | 0.759 | 0.2367 → 0.1798 | 95 |
+| Lapsed | 11,975 | 33.3% | **0.576** | 0.659 | 0.2453 → 0.2197 | 77 |
+
+**Mean holdout AUC 0.624**, against 0.702 on the rows the
+models were fitted on. That gap is the honest one, and reporting the holdout
+number is the whole point of the split — an earlier version of this README
+quoted 0.789–0.859, which were neither: they were carried over from a run on a
+different dataset, next to customer counts that had been updated.
+
+An AUC in the low 0.6s is a modest model, and it is what this data supports.
+Cell2Cell churn is famously hard — the published benchmark literature sits in
+roughly the same range — and the per-segment split makes it harder still by
+giving each model a fifth of the rows and a narrower slice of variation.
+
+### What calibration is worth
+
+**Brier 0.2342 → 0.1946** on held-out rows, a
+17% reduction. Calibration cannot change
+AUC — it is a monotone map, so the ranking is identical by construction — which
+is exactly why the pair of Brier scores is the number that means anything.
+
+The clearest way to see it: predicted churn now averages
+**0.2882** against an actual churn rate of
+**0.2882**. Uncalibrated, these models are trained with
+`class_weights=[1, pos_weight]`, which inflates the positive class on purpose,
+and their probabilities are then multiplied by CLV to rank retention spend.
+
+This is also why only **322 customers** are High Risk
+(calibrated P(churn) ≥ 0.6) rather than the tens of thousands an earlier version
+of this README reported. That larger figure was not a finding; it was the
+weighting artifact, read as risk.
+
+| Risk tier | Customers |
 |---|---|
-| Cluster stability (bootstrap ARI, 100 resamplings) | 0.886 — "Highly Stable" |
-| AUC range across 5 segments | 0.789 – 0.859 |
-| Persuadables identified (of 39,725 high-risk customers) | 798 |
-| Lost Causes identified | 38,927 |
+| High Risk (≥ 0.60) | 322 |
+| Medium Risk (0.30–0.60) | 25,502 |
+| Low Risk (< 0.30) | 25,223 |
 
-| Segment | Customers | Churn Rate | AUC |
-|---|---|---|---|
-| At-Risk | 8,400 | 26.4% | 0.859 |
-| Champions | 8,153 | 23.9% | 0.859 |
-| Lapsed | 11,975 | 33.3% | 0.793 |
-| Loyal Customers | 9,553 | 28.0% | 0.816 |
-| Price Sensitive | 12,966 | 30.0% | 0.789 |
+### Segmentation stability
+
+Bootstrap Adjusted Rand Index over 100 resamplings:
+**mean ARI 0.915 ± 0.136** —
+*Highly Stable*. The resampling draws from a seeded generator, so this
+figure is reproducible; it previously used NumPy's global RNG and moved on every
+run while the README quoted it to three decimals.
+
+### Uplift and the four quadrants
+
+| Customer type | Count | Meaning |
+|---|---|---|
+| Persuadable | 7,602 | High churn risk **and** responds to intervention — the target list |
+| Sure Thing | 2,731 | Would respond, but is not at risk — no spend needed |
+| Lost Cause | 18,222 | At risk, but intervention does not help |
+| Sleeping Dog | 22,492 | Not at risk, and contact makes things worse — do not disturb |
+
+`UpliftScore` is `mu_0 - mu_1`: **positive means the intervention reduces this
+customer's churn probability.** That convention is checked against observed
+outcomes on every run rather than assumed. Among customers who were actually
+treated, the top uplift decile churns at
+**0.2554** against the
+bottom decile's **0.4246**
+— the right way round, and the pipeline fails loudly if it ever is not.
+
+It was not the right way round. CausalML's meta-learners return `mu_1 - mu_0`,
+the treatment effect on the *outcome*, and the raw output was used unnegated.
+The outcome here is churn, so a large positive score marked the customers
+contact was expected to drive away — and `classify_customer_type` read it as
+"responds well". Every name on the Persuadable list was the model's strongest
+Sleeping Dog, and the AI agent wrote retention plans for all of them. The sign
+error produced a ranked list, sensible-looking ROI figures and a full dashboard,
+which is why it survived: nothing about it looked wrong.
+
+**Treatment is observational, not experimental.** `Complain` and `CouponUsed`
+are proxies for having received outreach, so these are associations under an
+assumption of no unmeasured confounding, not causal estimates. Production uplift
+models train on randomised experiment logs. The direction check above shares
+every confound of the proxy — it catches a flipped sign, which is what it is
+for, and it is not evidence of an effect size.
+<!-- END GENERATED RESULTS -->
 
 ---
 
@@ -580,7 +688,9 @@ All numbers below come from running the pipeline on the Cell2Cell dataset (51,04
 
 - **Observational uplift, not experimental.** The uplift models use behavioral proxies as treatment indicators (`Complain`, `CouponUsed`) rather than actual A/B test data. This is a documented limitation — production systems train uplift models on randomized experiment logs. The classification thresholds (`uplift ≥ 0.05`, `churn_prob ≥ 0.30`) are tunable via `classify_customer_type()` arguments.
 - **FastAPI scoring endpoint not cloud-deployed.** The dashboard and AI agent are fully deployed (Vercel + Supabase). The FastAPI `/score` endpoint is a standalone tool for programmatic scoring outside the dashboard — it runs locally or via Docker but is not required for the deployed system.
-- **No frontend test suite.** The Next.js dashboard has no automated tests. `tsc --noEmit` passes, but component behavior is untested.
+- **No frontend test suite.** The Next.js dashboard has no automated tests. CI runs `tsc --noEmit` and ESLint on every push, so type errors and lint regressions are caught, but component behaviour is untested.
+- **Modest AUC, honestly reported.** Holdout AUC sits in the low 0.6s. Cell2Cell is a hard churn dataset and splitting it five ways makes it harder; the models are useful for ranking, not for confident individual predictions. The calibration is what makes the ranking safe to spend money against.
+- **The agent endpoint is public and rate-limited in memory.** `/api/agent` takes no auth so anyone opening the demo can use it, which also means anyone can spend the Groq free tier. A per-IP bucket in module scope blunts casual abuse but does not survive across serverless instances; a shared store (Vercel KV, Upstash) is the real fix if this ever mattered.
 - **Groq free-tier rate limits.** The AI agent uses Groq's free tier (100,000 tokens/day). Sustained multi-user usage would require a paid tier or model-switching logic.
 - **Single-tenant Supabase setup.** Row Level Security is enabled and the policies are version-controlled in `supabase/rls_policies.sql` (anon read-only + feedback insert; service-role for server-side writes). The current policies treat all data as a single shared tenant — multi-tenant use would require per-tenant scoping in the policy predicates.
 
@@ -603,3 +713,7 @@ All numbers below come from running the pipeline on the Cell2Cell dataset (51,04
 ## License
 
 This repository is currently unlicensed. All rights reserved by the author.
+
+---
+
+Built by Shivani Bokka
