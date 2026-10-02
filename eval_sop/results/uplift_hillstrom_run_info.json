@@ -1,0 +1,30 @@
+{
+  "url": "http://www.minethatdata.com/Kevin_Hillstrom_MineThatData_E-MailAnalytics_DataMiningChallenge_2008.03.20.csv",
+  "sha256": "0e5893329d8b93cefecc571777672028290ab69865718020c78c7284f291aece",
+  "n_rows": 64000,
+  "treated_share": 0.66709375,
+  "features": [
+    "recency",
+    "history",
+    "mens",
+    "womens",
+    "newbie",
+    "zip_code_Rural",
+    "zip_code_Surburban",
+    "zip_code_Urban",
+    "channel_Multichannel",
+    "channel_Phone",
+    "channel_Web"
+  ],
+  "seeds": [
+    42,
+    7,
+    13,
+    21,
+    99
+  ],
+  "test_size": 0.3,
+  "n_boot": 500,
+  "note": "project learners use xgboost random_state=42 hard-coded in src/uplift_model.py; seed varies the train/test split and the baselines",
+  "runtime_s": 245.6
+}
