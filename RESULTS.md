@@ -1,8 +1,8 @@
 # RESULTS: an independent evaluation for SOP use
 
 Branch `sop-eval`, based on `main` at `8e68bc6`. I changed nothing under `src/`, `dashboard/`, `tests/` or `README.md`.
-All new code and outputs are in `eval_sop/`. The **agent evaluation has not been run yet**. The harness and
-scenario set exist, but no LLM was called (see section 4).
+All new code and outputs are in `eval_sop/`. The agent evaluation (section 4) was run on a local 7B model with an
+8k context and is scored programmatically. No paid API and no LLM judge were used.
 
 ## 0. Setup and reproduction
 
@@ -22,7 +22,8 @@ python eval_sop/churn_eval.py           # ~17 min on a shared laptop
 python eval_sop/uplift_hillstrom.py     # ~4 min with 2 threads (downloads + verifies Hillstrom if missing)
 python eval_sop/positivity_signflip.py  # <1 min
 python eval_sop/agent_eval.py --scenarios-only   # writes scenario set, no LLM
-python eval_sop/agent_eval.py --model qwen2.5:7b --seeds 0 1 2   # NOT YET RUN (needs a local Ollama slot)
+OMP_NUM_THREADS=2 python eval_sop/agent_eval.py --model qwen2.5:7b --seeds 0 1 2   # ~52 min, local Ollama
+OMP_NUM_THREADS=2 python eval_sop/agent_parser_check.py --model qwen2.5:7b          # ~10 min, parser-symmetry check
 ```
 
 **The README figures reproduce exactly.** With the project's own `churn_model.train_segment_model` and seed 42, every
@@ -130,25 +131,73 @@ On randomized Hillstrom data, the sign bug turns a Qini of +0.0028 into −0.002
 The buggy pipeline still reported positive ROI for every customer it selected. Its own reported numbers could not reveal
 the bug.
 
-## 4. Agent: harness built, not run
+## 4. Agent vs no-tools LLM vs rule policy (40 customers × 3 seeds)
 
-- `eval_sop/agent_eval.py` drives the project's **Python** agent (`src/agent_loop.generate_retention_action_agentic`,
-  unmodified) against a local Ollama model through the OpenAI-compatible API. It compares the agent with (a) the same
-  LLM without tools and (b) a rule policy (intervene iff Persuadable and NetROI > 0, playbook entry from the top SHAP
-  driver).
-- Scoring is **programmatic, with no LLM judge**: valid JSON, agreement with the rule, interventions on Lost Cause or Sleeping Dog,
-  whether the true top-SHAP driver is cited, cost greater than model-expected value, tool calls and latency. Bootstrap CIs are over customers.
-  The run also writes `agent_eval_human_validation.csv` with blank human-rating columns.
-- Scenario set: `eval_sop/agent_scenarios.csv`, 40 customers, 10 per CustomerType (`sample(random_state=0)`), with
-  rule-based outputs. The rule baseline already shows one problem: it picks "High ($50–100)" interventions for
-  customers whose model-expected value is under $50, because NetROI assumes a flat $15 cost.
-- **Not run.** On the first attempt the shared local Ollama server returned HTTP 500 on every chat request for more than
-  an hour while other jobs loaded it. I produced no agent numbers and claim none.
-- Limits even once run: this is the Python agent (6 tools, local DataFrame), not the deployed TypeScript route (12 tools,
-  Supabase). A local 7B model is not the deployed model. "Agreement with rule" is a consistency check, not a retention outcome.
-- **Label leakage, found by inspection:** `lookup_customer_details` returns `actually_churned`, the realized label
-  (src/agent_tools.py:204). The deployed route returns `select("*")` from `customers`, which includes `churn`
-  (route.ts:422-429, migrate_to_supabase.py:66,104). The harness strips the key before the LLM sees it. src/ is not changed.
+**Setup.**
+- **Agent:** the project's **Python** agent, `src/agent_loop.generate_retention_action_agentic`, with its system prompt,
+  6 tools from `src/agent_tools.py`, max 5 rounds and its own JSON parsing, all unmodified. Only the client is swapped:
+  `agent_loop.Groq` is replaced by a shim that calls the native Ollama `/api/chat`.
+- **Model and sampling:** `qwen2.5:7b` (Ollama tag, Q4), `num_ctx=8192`, `temperature=0.7`, seeds {0, 1, 2}. One request at a time on :11434.
+  The model was unloaded afterwards (`keep_alive: 0`; `/api/ps` was empty).
+- **Context budget:** the full 6-tool schema fits, so no tool subset or output truncation was needed. The harness estimates every prompt at
+  chars/3 tokens, which over-counts: on cold calls Ollama's `prompt_eval_count` was 1,353 tokens where the estimate said 2,036.
+  It counts a run as a failure if estimate + `max_tokens` (1,500) > 8,192. The largest prompt estimate was 3,993 tokens,
+  and 0/240 LLM runs overflowed (`agent_eval_token_check.json`).
+- **Label leak stripped:** the harness drops the `actually_churned`, `churn` and `Churn` keys from every tool result. The segment-level
+  `actual_churn_rate` aggregate is kept.
+- **No-tools LLM:** the same model and JSON contract, and the same facts the agent's first user message gets (segment,
+  churn probability, uplift, customer type, CLV), but no tools.
+- **Rule policy:** intervene iff Persuadable and NetROI > 0, using the playbook entry for the top signed SHAP driver.
+- **Scenario set:** `eval_sop/agent_scenarios.csv`, 10 customers per CustomerType.
+- **Scoring:** programmatic. **There is no ground-truth retention outcome**, because Cell2Cell has no randomized intervention.
+  "Agrees with rule" therefore means consistency with the project's own decision rule, not business value.
+- **Parsing:** the agent is parsed with the project's own parser. For symmetry the no-tools arm was re-run and parsed both ways:
+  100% valid under both (`agent_eval_no_tools_parser_check.csv`).
+- **Infrastructure errors:** none (0 excluded).
+
+Results: means over all 120 runs per arm, with 95% bootstrap CIs over the 40 customers (seed-averaged per customer).
+Source: `agent_eval_summary_ci.csv` and `agent_eval_rows.csv`.
+
+| Metric | Agent (tools) | No-tools LLM | Rule policy |
+|---|---|---|---|
+| Valid final JSON (project parser) | **83.3%** [75.0, 90.8] | 100% | 100% |
+| Decision agrees with project rule | **44.2%** [33.3, 55.0] | 75.0% [62.5, 87.5] | 100% (by definition) |
+| Intervened on Lost Cause / Sleeping Dog (the system prompt forbids this) | **18.3%** [9.2, 29.2] | 0.8% [0, 2.5] | 0% |
+| Intervention rate | 60.8% | 50.0% | 25.0% |
+| Recommended cost tier > model-expected value (uplift × $500) | 21.7% [13.3, 31.7] | 0% | 15.0% [5.0, 27.5] |
+| Playbook query names the customer's true top SHAP driver | 70.8% [58.3, 83.3] | n/a | n/a |
+| ROI tool called with the customer's true uplift (±0.01) | 99.2% [97.5, 100] | n/a | n/a |
+| Final reason cites the true top SHAP driver (per run; 0 if no intervention) | 60.8% [48.3, 74.2] | 0% | 25.0% |
+| Tool calls / latency | 4.7 / 21.1 s | 0 / 5.2 s | 0 / 0 s |
+
+By customer type, intervention rate for agent / no-tools: Persuadable 0.90 / 1.00, Sure Thing 0.80 / 0.97,
+**Sleeping Dog 0.67 / 0.03**, Lost Cause 0.07 / 0.00. Valid-JSON rate for the agent on Lost Cause customers: 0.57. All 20 invalid agent
+outputs are "Could not parse JSON from agent response" from the project's parser. Across-seed std: agent valid-JSON 0.113,
+agreement 0.104.
+
+What this supports:
+- The tool loop does ground the agent in the data it retrieves. It passes the true uplift to the ROI tool in 99% of runs
+  and queries the playbook for the true top driver in 71%.
+- On this model, tools make **decisions worse** by the project's own standard. The agent intervenes on two-thirds of
+  Sleeping Dogs, and its agreement with the rule drops from 75% (no tools) to 44%.
+- The agent's JSON fails the project's parser 17% of the time.
+- One plausible mechanism, **not verified**: Sleeping Dogs often have a small positive uplift, and the ROI tool then returns
+  "Intervene — positive ROI" at the low cost the agent itself chooses.
+
+What it does not support:
+- Any claim about the deployed agent (TypeScript, 12 tools, Supabase, a hosted larger model) or about retention outcomes.
+- Generalisation beyond one 7B model, 40 customers and three seeds.
+- Small cells: the per-type rates rest on 30 runs each.
+
+Observations:
+- The rule baseline also picks "High ($50–100)" interventions for customers whose model-expected value is under $50,
+  because NetROI assumes a flat $15 cost.
+- `agent_eval_human_validation.csv` (seed 0, 120 rows) has blank columns for human rating. It has not been human-validated.
+
+**Label leakage, found by inspection:** `lookup_customer_details` returns `actually_churned`, the realized label
+(src/agent_tools.py:204). The deployed route returns `select("*")` from `customers`, which includes `churn`
+(route.ts:422-429, migrate_to_supabase.py:66,104). The harness strips these keys; src/ is unchanged. Before the strip
+was in place, no agent run reached the model, so no result here was produced with the leak.
 
 **Paid-API needs: none required.** For reference, an optional run of the deployed-style agent on a hosted model is
 about 40 customers × 3 seeds × ~20k input + ~1.5k output tokens, roughly 2.4M input and 0.2M output tokens. At typical
@@ -177,6 +226,9 @@ These are estimates from list-price ranges, not quotes, and nothing was spent.
    in all five seeds (Qini 0.0028 ± 0.0008 versus −0.0005). Targeting by predicted risk, and the sign-inverted score from a bug I had shipped, both scored below random in all five seeds."
 3. "Isotonic calibration cut expected calibration error from 0.20 to 0.015. Measured against a base-rate forecast, though,
    the model's Brier skill is about 4%, not the 17% I had reported."
+4. (Agent, optional) "In a programmatic evaluation of my tool-using retention agent (40 customers × 3 seeds, local 7B model),
+   tool use grounded its reasoning (it passed the true uplift to the ROI tool in 99% of runs) but made its decisions less
+   consistent with the system's own targeting rule than the same model without tools (44% vs 75% agreement)."
 
 ## 7. Proposed README corrections (not applied)
 
@@ -191,6 +243,8 @@ These are estimates from list-price ranges, not quotes, and nothing was spent.
 | # | Change | Why | Evidence | Preserved |
 |---|---|---|---|---|
 | 1 | Added `eval_sop/` (scripts, `results/`, `agent_scenarios.csv`, `.gitignore` for `data/`) and this file | Deliverable | Each script names its inputs and outputs. Seed-42 reproduction matches the README exactly | No existing file modified |
+| 2 | `eval_sop/agent_eval.py`: native-Ollama shim (`num_ctx=8192`, sequential), token-budget accounting that counts overflow as failure, leak-key stripping (`actually_churned`, `churn`, `Churn`), `--limit` and `--scenarios-only` flags, resumable checkpoint, `keep_alive: 0` unload, two trace-grounding metrics | Coordinator constraints (8k context, one request at a time, leak stripped). The OpenAI-compatible endpoint cannot set `num_ctx` | `agent_eval_token_check.json` (max est. 3,993 tokens, 0 overflows); 3-customer timing run before the full run; direct check: the unwrapped `lookup_customer_details` returns `actually_churned`, the wrapped one returns no churn-label key | `src/agent_loop.py` and `src/agent_tools.py` unmodified; only the client and the tool-result filter are wrapped |
+| 3 | Added `eval_sop/agent_parser_check.py` | The agent was scored with the project's strict parser and the no-tools arm with a lenient one. This checks the asymmetry | `agent_eval_no_tools_parser_check.csv`: 100% valid under both parsers, so the comparison is unaffected | — |
 | — | **No change to `src/`, `tests/`, `dashboard/`, `README.md`** | Every issue below is either already confirmed by a script in `eval_sop/` or not needed for a valid eval. The harness works around the label leak without editing src | `git diff main --stat` shows only additions | All comments and docs |
 
 The existing test suite was run before committing: `python -m pytest -q` → 73 passed.
@@ -202,6 +256,10 @@ The existing test suite was run before committing: `python -m pytest -q` → 73 
 - Make `src/uplift_model.py` fail loudly, not fall back, when CausalML cannot be imported. Reproduced: importing it in an
   env with numpy 2.5 logs "CausalML not available — using custom T-learner fallback" and continues.
 - Replace the Cell2Cell treatment proxy, or drop `Complain` from it, and add a held-out Qini to the pipeline.
-- Run the agent eval (section 4) once an Ollama slot is available. Run the Criteo subsample.
+- Run the Criteo subsample. Run the agent eval on a second model and on the deployed TypeScript route (needs a hosted
+  model; see the cost estimate). Human-rate `agent_eval_human_validation.csv`.
+- Make the agent's JSON parsing tolerant of trailing text (src/agent_loop.py, the `json.loads(raw)` path). 17% of agent
+  replies fail it. Not changed, because I have not inspected full replies (the stored `raw_response` is cut at 500 chars) and
+  have no failing test.
 - Cleanup: the evaluation venv lives at `%TEMP%\sopvenv` (outside the repo, because of the Windows MAX_PATH limit under the
   scratchpad). It can be deleted after review.
