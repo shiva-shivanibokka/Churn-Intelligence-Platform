@@ -33,26 +33,87 @@ import time
 
 import numpy as np
 import pandas as pd
-from openai import OpenAI
 
 from common import OUT, ROOT  # noqa: E402
 
 import agent_loop  # noqa: E402
 import agent_tools  # noqa: E402
 
-OLLAMA = "http://localhost:11434/v1"
+OLLAMA_NATIVE = "http://localhost:11434/api/chat"
+NUM_CTX = 8192  # hard context budget for this eval (coordinator constraint)
 TYPES = ["Persuadable", "Sure Thing", "Lost Cause", "Sleeping Dog"]
 COST_MID = {"low": 3.0, "medium": 17.5, "high": 75.0}
+CHARS_PER_TOKEN_EST = 3.0  # conservative (over-counts tokens); checked against Ollama prompt_eval_count on cold calls
+
+# Per-run budget bookkeeping, reset by the caller before each agent / no-tools run.
+BUDGET = {"max_est_prompt_tokens": 0, "overflow": False, "calls": 0, "cold_calls": []}
+
+
+class _Obj:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+def _to_native(messages):
+    """OpenAI-style message list -> Ollama native: tool-call arguments as dicts."""
+    out = []
+    for m in messages:
+        m = dict(m)
+        if m.get("tool_calls"):
+            tcs = []
+            for tc in m["tool_calls"]:
+                f = tc["function"] if isinstance(tc, dict) else tc.function.__dict__
+                args = f["arguments"]
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        args = {}
+                tcs.append({"function": {"name": f["name"], "arguments": args}})
+            m["tool_calls"] = tcs
+        m.pop("tool_call_id", None)
+        out.append(m)
+    return out
+
+
+def ollama_chat(model, messages, tools=None, max_tokens=1500, temperature=0.7, seed=0):
+    """One request to the native Ollama API with num_ctx fixed at NUM_CTX.
+
+    Returns an object shaped like an OpenAI ChatCompletion so src/agent_loop.py runs unchanged.
+    finish_reason is 'tool_calls' when the model called tools (this mirrors Ollama's own
+    OpenAI-compatible endpoint; the native API always says 'stop').
+    """
+    import urllib.request
+    body = {"model": model, "messages": _to_native(messages), "stream": False,
+            "options": {"num_ctx": NUM_CTX, "num_predict": max_tokens, "temperature": temperature, "seed": seed}}
+    if tools:
+        body["tools"] = tools
+    est = (len(json.dumps(body["messages"])) + len(json.dumps(tools or []))) / CHARS_PER_TOKEN_EST
+    BUDGET["calls"] += 1
+    BUDGET["max_est_prompt_tokens"] = max(BUDGET["max_est_prompt_tokens"], int(est))
+    if est + max_tokens > NUM_CTX:
+        BUDGET["overflow"] = True  # counted as a failure by score(); the call still runs (Ollama would truncate)
+    req = urllib.request.Request(OLLAMA_NATIVE, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+    r = json.load(urllib.request.urlopen(req, timeout=900))
+    if BUDGET["calls"] == 1:  # first call of a run has a cold prefix -> prompt_eval_count is the real prompt size
+        BUDGET["cold_calls"].append({"est_tokens": int(est), "prompt_eval_count": r.get("prompt_eval_count")})
+    msg = r.get("message", {})
+    tcs = [
+        _Obj(id=f"call_{i}", type="function",
+             function=_Obj(name=tc["function"]["name"], arguments=json.dumps(tc["function"].get("arguments", {}))))
+        for i, tc in enumerate(msg.get("tool_calls") or [])
+    ]
+    finish = "tool_calls" if tcs else ("length" if r.get("done_reason") == "length" else "stop")
+    return _Obj(choices=[_Obj(message=_Obj(content=msg.get("content", ""), tool_calls=tcs or None), finish_reason=finish)])
 
 
 class _Completions:
-    def __init__(self, client, seed, temperature):
-        self._c, self.seed, self.temperature = client, seed, temperature
+    def __init__(self, seed, temperature):
+        self.seed, self.temperature = seed, temperature
 
-    def create(self, **kw):
-        kw.setdefault("temperature", self.temperature)
-        kw["seed"] = self.seed
-        return self._c.chat.completions.create(**kw)
+    def create(self, model, messages, tools=None, tool_choice=None, max_tokens=1500, **kw):
+        return ollama_chat(model, messages, tools=tools, max_tokens=max_tokens,
+                           temperature=kw.get("temperature", self.temperature), seed=self.seed)
 
 
 class _Chat:
@@ -67,14 +128,25 @@ class OllamaAsGroq:
     temperature = 0.7
 
     def __init__(self, api_key=None):
-        self.chat = _Chat(_Completions(OpenAI(base_url=OLLAMA, api_key="ollama", timeout=900, max_retries=2), self.seed, self.temperature))
+        self.chat = _Chat(_Completions(self.seed, self.temperature))
+
+
+def unload(model):
+    import urllib.request
+    req = urllib.request.Request("http://localhost:11434/api/generate", data=json.dumps({"model": model, "keep_alive": 0}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    return json.load(urllib.request.urlopen(req, timeout=120))
+
+
+LEAK_KEYS = ("actually_churned", "churn", "Churn")
 
 
 def leak_free_execute_tool(orig):
     def run(name, args, df, playbook):
         r = orig(name, args, df, playbook)
         if isinstance(r, dict):
-            r.pop("actually_churned", None)
+            for k in LEAK_KEYS:
+                r.pop(k, None)
         return r
     return run
 
@@ -121,9 +193,8 @@ def no_tools(row, model, seed, clv=500.0):
             f"Their segment is '{row['Segment']}', churn probability is {row['ChurnProbability']:.1%}, "
             f"uplift score is {row['UpliftScore']:+.3f}, and customer type is '{row['CustomerType']}'. "
             f"Assume CLV = ${clv:.0f}.")
-    c = OpenAI(base_url=OLLAMA, api_key="ollama", timeout=900, max_retries=2)
-    r = c.chat.completions.create(model=model, messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": user}],
-                                  temperature=OllamaAsGroq.temperature, seed=seed, max_tokens=1500)
+    r = ollama_chat(model, [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user}],
+                    max_tokens=1500, temperature=OllamaAsGroq.temperature, seed=seed)
     return r.choices[0].message.content or ""
 
 
@@ -135,9 +206,17 @@ def cost_of(tier):
     return np.nan
 
 
-def score(row, out, trace=None):
+def _close(x, y, tol=0.01):
+    try:
+        return abs(float(x) - float(y)) < tol
+    except (TypeError, ValueError):
+        return False
+
+
+def score(row, out, trace=None, overflow=False):
     feat, _ = top_driver(row)
-    valid = isinstance(out, dict) and ("do_not_intervene_reason" in out or "intervention_type" in out)
+    # A run whose prompt would not fit the 8k context is a failure regardless of what came back.
+    valid = (not overflow) and isinstance(out, dict) and ("do_not_intervene_reason" in out or "intervention_type" in out)
     intervene = bool(valid and "intervention_type" in out and "do_not_intervene_reason" not in out)
     ref = bool(row["CustomerType"] == "Persuadable" and row["NetROI"] > 0)
     reason = str(out.get("primary_risk_reason", "")) if isinstance(out, dict) else ""
@@ -153,7 +232,21 @@ def score(row, out, trace=None):
         "model_estimated_net_value_usd": float(ev - cost) if intervene else 0.0,
         "n_tool_calls": len(tools), "called_drivers_tool": "get_top_churn_drivers" in tools,
         "called_roi_tool": "calculate_intervention_roi" in tools,
+        "budget_overflow": bool(overflow),
+        # Did the agent's playbook query target the customer's actual top driver, and did it pass its true uplift to the ROI tool?
+        "playbook_query_matches_top_driver": bool(feat and any(t["tool"] == "search_retention_playbook" and feat.lower() in str(t["args"]).lower() for t in (trace or []))),
+        "roi_tool_used_true_uplift": bool(any(t["tool"] == "calculate_intervention_roi" and _close(t["args"].get("uplift_score"), row["UpliftScore"])
+                                             for t in (trace or []) if isinstance(t.get("args"), dict))),
     }
+
+
+def reset_budget():
+    BUDGET.update(max_est_prompt_tokens=0, overflow=False, calls=0)
+
+
+def is_infra(err: str) -> bool:
+    e = str(err or "").lower()
+    return any(k in e for k in ("timed out", "connection", "urlopen", "http error 5", "remote end closed"))
 
 
 def main():
@@ -161,6 +254,7 @@ def main():
     ap.add_argument("--model", default="qwen2.5:7b")
     ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
     ap.add_argument("--n", type=int, default=40)
+    ap.add_argument("--limit", type=int, default=None, help="only the first K scenarios (for timing)")
     ap.add_argument("--scenarios-only", action="store_true", help="write the scenario set + rule baseline, call no LLM")
     args = ap.parse_args()
 
@@ -177,6 +271,9 @@ def main():
     if args.scenarios_only:
         print(f"wrote {len(scen)} scenarios to eval_sop/agent_scenarios.csv (no LLM called)")
         return
+
+    if args.limit:
+        sample = sample.iloc[: args.limit]
 
     # Wire the project's agent to the local model, unchanged otherwise.
     agent_loop.Groq = OllamaAsGroq
@@ -204,18 +301,22 @@ def main():
             n_rows0, n_raw0 = len(rows), len(raw_log)
             # agent
             ts = time.time()
+            reset_budget()
             a = agent_loop.generate_retention_action_agentic(row, df, playbook, api_key="local")
+            b_agent = dict(BUDGET)
             lat = time.time() - ts
             trace = a.pop("trace", [])
             out = {k: v for k, v in a.items() if k not in ("customer_id", "segment", "churn_probability", "uplift_score", "net_roi")}
             if out.get("error") is None:
                 out.pop("error", None)
-            s = score(row, out, trace)
-            infra = "timed out" in str(out.get("error", "")).lower() or "connection" in str(out.get("error", "")).lower()
-            rows.append({"approach": "agent", "seed": seed, "customer_id": row["CustomerID"], "customer_type": row["CustomerType"], "latency_s": lat, "infra_error": infra, **s})
+            s = score(row, out, trace, overflow=b_agent["overflow"])
+            infra = is_infra(out.get("error", ""))
+            rows.append({"approach": "agent", "seed": seed, "customer_id": row["CustomerID"], "customer_type": row["CustomerType"], "latency_s": lat, "infra_error": infra,
+                         "llm_calls": b_agent["calls"], "max_est_prompt_tokens": b_agent["max_est_prompt_tokens"], **s})
             raw_log.append({"approach": "agent", "seed": seed, "customer_id": row["CustomerID"], "output": out, "trace_tools": [(t["tool"], t["args"]) for t in trace]})
             # no tools
             ts = time.time()
+            reset_budget()
             try:
                 raw = no_tools(row, args.model, seed)
                 infra = False
@@ -223,18 +324,26 @@ def main():
                 raw, infra = f"INFRA_ERROR: {e}", True
             lat = time.time() - ts
             out = parse_json(raw) or {"raw": raw[:500]}
-            s = score(row, out)
-            rows.append({"approach": "no_tools_llm", "seed": seed, "customer_id": row["CustomerID"], "customer_type": row["CustomerType"], "latency_s": lat, "infra_error": infra, **s})
+            s = score(row, out, overflow=BUDGET["overflow"])
+            rows.append({"approach": "no_tools_llm", "seed": seed, "customer_id": row["CustomerID"], "customer_type": row["CustomerType"], "latency_s": lat, "infra_error": infra,
+                         "llm_calls": BUDGET["calls"], "max_est_prompt_tokens": BUDGET["max_est_prompt_tokens"], **s})
             raw_log.append({"approach": "no_tools_llm", "seed": seed, "customer_id": row["CustomerID"], "output": out})
             # rule
             out = rule_policy(row, playbook)
             s = score(row, out)
-            rows.append({"approach": "rule_based", "seed": seed, "customer_id": row["CustomerID"], "customer_type": row["CustomerType"], "latency_s": 0.0, "infra_error": False, **s})
+            rows.append({"approach": "rule_based", "seed": seed, "customer_id": row["CustomerID"], "customer_type": row["CustomerType"], "latency_s": 0.0, "infra_error": False, "llm_calls": 0, "max_est_prompt_tokens": 0, **s})
             raw_log.append({"approach": "rule_based", "seed": seed, "customer_id": row["CustomerID"], "output": out})
             with open(ckpt, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps({"seed": seed, "customer_id": row["CustomerID"], "rows": rows[n_rows0:], "raw": raw_log[n_raw0:]}, default=str) + "\n")
             print(f"seed {seed} customer {i+1}/{len(sample)} ({time.time()-t0:.0f}s)", flush=True)
 
+    try:
+        unload(args.model)  # keep_alive: 0
+        print("model unloaded (keep_alive=0)")
+    except Exception as e:
+        print("unload failed:", e)
+    with open(os.path.join(OUT, "agent_eval_token_check.json"), "w") as fh:
+        json.dump({"chars_per_token_assumed": CHARS_PER_TOKEN_EST, "num_ctx": NUM_CTX, "cold_calls": BUDGET["cold_calls"]}, fh, indent=2)
     res = pd.DataFrame(rows)
     n_infra = int(res["infra_error"].sum())
     print(f"infra errors excluded from scoring: {n_infra}")
@@ -246,8 +355,8 @@ def main():
         for r in raw_log:
             fh.write(json.dumps(r, default=str) + "\n")
 
-    metrics = ["valid_json", "agrees_with_rule", "intervened_on_lost_cause_or_sleeping_dog", "cites_true_top_shap_driver",
-               "cost_exceeds_model_expected_value", "intervene", "model_estimated_net_value_usd", "n_tool_calls", "latency_s"]
+    metrics = ["valid_json", "budget_overflow", "agrees_with_rule", "intervened_on_lost_cause_or_sleeping_dog", "cites_true_top_shap_driver",
+               "cost_exceeds_model_expected_value", "playbook_query_matches_top_driver", "roi_tool_used_true_uplift", "intervene", "model_estimated_net_value_usd", "n_tool_calls", "latency_s"]
     per_seed = res.groupby(["approach", "seed"])[metrics].mean()
     summ = per_seed.groupby("approach").agg(["mean", "std"])
     # bootstrap over customers (seed-averaged per customer)
@@ -281,7 +390,7 @@ def main():
                        "HUMAN_decision_reasonable(Y/N)": "", "HUMAN_grounded_in_data(Y/N)": "", "HUMAN_notes": ""})
     pd.DataFrame(hv).to_csv(os.path.join(OUT, "agent_eval_human_validation.csv"), index=False)
     with open(os.path.join(OUT, "agent_eval_run_info.json"), "w") as fh:
-        json.dump({"model": args.model, "endpoint": "ollama local (OpenAI-compatible)", "seeds": args.seeds,
+        json.dump({"model": args.model, "endpoint": "ollama local native /api/chat, num_ctx=8192, sequential", "seeds": args.seeds,
                    "temperature": OllamaAsGroq.temperature, "n_customers": len(sample),
                    "sample": "10 per CustomerType from data/processed/uplift.parquet, pandas sample random_state=0",
                    "runtime_s": round(time.time() - t0, 1), "n_infra_errors_excluded": n_infra}, fh, indent=2)
