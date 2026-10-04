@@ -31,7 +31,8 @@ OMP_NUM_THREADS=2 python eval_sop/agent_eval.py --scenarios-only   # writes scen
 OMP_NUM_THREADS=2 python eval_sop/agent_eval.py --model qwen2.5:7b --seeds 0 1 2   # ~52 min, local Ollama
 OMP_NUM_THREADS=2 python eval_sop/agent_parser_check.py --agent             # <1 min, offline; agent-arm parser symmetry
 OMP_NUM_THREADS=2 python eval_sop/agent_parser_check.py --no-tools --model qwen2.5:7b   # ~10 min, no-tools arm
-OMP_NUM_THREADS=2 python eval_sop/agent_section4_figures.py   # <1 min, offline; every section-4 figure + CI
+OMP_NUM_THREADS=2 python eval_sop/agent_third_arm.py --model qwen2.5:7b --seeds 0 1 2   # ~10 min, local Ollama (arm B)
+OMP_NUM_THREADS=2 python eval_sop/agent_section4_figures.py   # <1 min, offline; every section-4 figure + CI + decomposition
 python -m pytest -q                                           # 82 passed (73 existing + 9 defect-reproduction)
 ```
 
@@ -213,12 +214,25 @@ selected. Its own reported numbers could not reveal the bug.
   and 0/240 LLM runs overflowed (`agent_eval_token_check.json`).
 - **Label leak stripped:** the harness drops the `actually_churned`, `churn` and `Churn` keys from every tool result. The segment-level
   `actual_churn_rate` aggregate is kept.
-- **No-tools LLM:** the same model and JSON contract, and the same facts the agent's first user message gets (segment,
-  churn probability, uplift, customer type, CLV), but no tools. **This arm is not a clean tool ablation.** Its system
-  prompt is `SYSTEM_PROMPT_BATCH` truncated at "Use the available tools" (`agent_eval.py:190-193`), which also drops the
-  numbered 5-step gather-then-recommend sequence (`src/agent_loop.py:36-41`). So the two arms differ in tool access, in
-  prompt content, and in the ~4.7 rounds of tool output the agent accumulates. Read every agent-vs-no-tools comparison
-  below as a contrast between two whole configurations.
+- **No-tools LLM (arm C):** the same model and JSON contract, and the same facts the agent's first user message gets
+  (segment, churn probability, uplift, customer type, CLV), but no tools. Its system prompt is `SYSTEM_PROMPT_BATCH`
+  **truncated** at "Use the available tools" (`agent_eval.py:190-193`), which also drops the numbered 5-step
+  gather-then-recommend sequence (`src/agent_loop.py:36-41`). So arm C differs from the agent in tool access *and* in
+  prompt content.
+- **Full-prompt-no-tools (arm B) — the control that disentangles those two.** `eval_sop/agent_third_arm.py` runs
+  `SYSTEM_PROMPT_BATCH` **verbatim** (5-step tool sequence intact, which still instructs the model to call tools that are
+  not supplied) with **no tools attached**, one shot, same 40 customers × 3 seeds, same model, same lenient parser as
+  arm C. So:
+
+  | Arm | System prompt | Tools | Rounds |
+  |---|---|---|---|
+  | **A** `agent` | full `SYSTEM_PROMPT_BATCH` | 6 | up to 5 (~4.7 used) |
+  | **B** `full_prompt_no_tools` | full `SYSTEM_PROMPT_BATCH`, verbatim | none | 1 |
+  | **C** `no_tools_llm` | truncated (5-step sequence dropped) | none | 1 |
+
+  **A vs B isolates the tools** (prompt held fixed); **B vs C isolates the prompt** (no tools in either). This replaces
+  the earlier three-ways-at-once comparison, and it resolves it — see the decomposition below. Arm B retains full
+  untruncated replies, unlike the agent arm.
 - **Rule policy:** intervene iff Persuadable and NetROI > 0, using the playbook entry for the top signed SHAP driver.
 - **Never-intervene:** a trivial baseline that always outputs "do not intervene".
 - **Scenario set:** `eval_sop/agent_scenarios.csv`, 10 customers per CustomerType.
@@ -243,11 +257,29 @@ selected. Its own reported numbers could not reveal the bug.
 - **Infrastructure errors:** none (0 excluded).
 
 **Headline: Sleeping Dogs.** These are customers the pipeline labels "do not contact", and the system prompt says not to intervene on them.
-- The agent, in the project's tool-using configuration, recommended an intervention for **20 of 30 Sleeping Dog runs
-  (0.67; clustered-bootstrap CI 0.43–0.87, uncorrected)**.
-- The same model with no tools and the shorter prompt did so for **1 of 30 (0.03; CI 0.00–0.10, uncorrected)**.
-- The rule policy and never-intervene did so for 0 of 30.
-- Remember the confound: the two LLM arms differ in prompt as well as in tool access (see Setup).
+- **A** agent, tools: **20 of 30 Sleeping Dog runs (0.67; clustered-bootstrap CI 0.43–0.87, uncorrected)**.
+- **B** same full prompt, tools removed: **5 of 30 (0.17; CI 0.03–0.33)**.
+- **C** truncated prompt, no tools: **1 of 30 (0.03; CI 0.00–0.10)**.
+- The rule policy and never-intervene: 0 of 30.
+
+**The confound is resolved: it is the tools.** Arm B lands at 0.17, far nearer arm C (0.03) than arm A (0.67). Paired on
+the 10 Sleeping-Dog customers, 2,000 clustered bootstrap resamples
+(`agent_sleeping_dog_decomposition.csv`, from `agent_section4_figures.py`):
+
+| Contrast | Isolates | Difference | 95% CI (uncorrected) | Excludes 0 |
+|---|---|---|---|---|
+| A − B (0.67 → 0.17) | **the tools**, prompt held fixed | **+0.500** | **[0.233, 0.733]** | **yes** |
+| B − C (0.17 → 0.03) | the prompt, no tools in either | +0.133 | [0.000, 0.300] | no |
+| A − C (0.67 → 0.03) | both together (the original contrast) | +0.633 | [0.400, 0.833] | yes |
+
+Giving this 7B model the tools raises Sleeping-Dog contact by **0.50 on its own**, with the prompt held fixed, and that
+interval excludes zero. The prompt's own contribution is +0.13 with an interval that reaches zero, so on 10 customers it
+is **not distinguishable from no effect** — it may be real but this design cannot show it. Nearly four-fifths of the
+original 0.633 gap (0.500/0.633) is attributable to tool access.
+
+A second, cleaner difference between the arms points the same way: **arm B produced valid JSON in 120/120 runs, against
+100/120 for the agent.** Since B and A share the identical system prompt, the agent's 17% parse-failure rate is a
+property of the *tool loop* — long multi-round contexts ending in unterminated JSON — not of the prompt.
 
 **Estimators, stated explicitly.** Two are in play, and on the parseable-only subset they differ by 5.8 points, so each
 row below names the one it uses:
@@ -264,20 +296,20 @@ anywhere.** Every figure in this section is recomputed by `eval_sop/agent_sectio
 `agent_section4_figures.csv` + `_info.json`; where a row also exists in `agent_eval_summary_ci.csv` the two bootstraps
 agree to within ±0.01 on the bounds.
 
-| Metric | Estimator | Agent (tools) | No-tools LLM | Rule policy | Never-intervene |
-|---|---|---|---|---|---|
-| Intervened on a Sleeping Dog (/30 SD runs) | ratio = per-cust. | **0.67** (20/30) [0.43, 0.87] | 0.03 (1/30) [0.00, 0.10] | 0 (0/30) | 0 (0/30) |
-| Intervened on Lost Cause or Sleeping Dog (/60 LC+SD runs) | ratio = per-cust. | **36.7%** (22/60) [20.0, 55.0] | 1.7% (1/60) [0.0, 5.0] | 0 (0/60) | 0 (0/60) |
-| *Same event, /120 all runs (as `summary_ci.csv` reports it)* | ratio = per-cust. | 18.3% (22/120) [9.2, 29.2] | 0.8% (1/120) [0, 2.5] | 0 | 0 |
-| Valid final JSON (parser as scored) | ratio = per-cust. | 83.3% (100/120) [75.0, 90.8] | 100% (120/120) | 100% | 100% |
-| Agrees with project rule, **parseable replies only** | **ratio** | **53.0%** (53/100) [39.4, 66.7] | 75.0% (90/120) [62.5, 87.5] | 100% (by definition) | **75.0%** (90/120) [60.0, 87.5] |
-| Agrees with project rule, **parseable replies only** | **per-customer** | **58.8%** (53/100) [45.0, 71.7] | 75.0% (90/120) [60.8, 87.5] | 100% (by definition) | **75.0%** (90/120) [60.0, 87.5] |
-| Agrees with project rule, all runs (unparseable = disagree) | ratio = per-cust. | 44.2% (53/120) [33.3, 55.0] | 75.0% | 100% | 75.0% |
-| Intervention rate | ratio | 60.8% | 50.0% | 25.0% | 0% |
-| Recommended cost tier > model-expected value (uplift × $500) | per-customer | 21.7% [13.3, 31.7] | 0% | 15.0% [5.0, 27.5] | 0% |
-| Playbook query names the customer's true top SHAP driver | per-customer | 70.8% [58.3, 83.3] | n/a | n/a | n/a |
-| ROI tool called with the customer's true uplift (±0.01) | per-customer | 99.2% [97.5, 100] | n/a | n/a | n/a |
-| Tool calls / latency | mean | 4.7 / 21.1 s | 0 / 5.2 s | 0 / 0 s | 0 / 0 s |
+| Metric | Estimator | A: Agent (tools) | B: Full prompt, no tools | C: No-tools LLM | Rule policy | Never-intervene |
+|---|---|---|---|---|---|---|
+| Intervened on a Sleeping Dog (/30 SD runs) | ratio = per-cust. | **0.67** (20/30) [0.43, 0.87] | **0.17** (5/30) [0.03, 0.33] | 0.03 (1/30) [0.00, 0.10] | 0 (0/30) | 0 (0/30) |
+| Intervened on Lost Cause or Sleeping Dog (/60 LC+SD runs) | ratio = per-cust. | **36.7%** (22/60) [20.0, 55.0] | 8.3% (5/60) [1.7, 18.3] | 1.7% (1/60) [0.0, 5.0] | 0 (0/60) | 0 (0/60) |
+| *Same event, /120 all runs (as `summary_ci.csv` reports it)* | ratio = per-cust. | 18.3% (22/120) [9.2, 29.2] | 4.2% (5/120) | 0.8% (1/120) [0, 2.5] | 0 | 0 |
+| Valid final JSON (parser as scored) | ratio = per-cust. | 83.3% (100/120) [75.0, 90.8] | **100% (120/120)** | 100% (120/120) | 100% | 100% |
+| Agrees with project rule, **parseable replies only** | **ratio** | **53.0%** (53/100) [39.4, 66.7] | 70.8% (85/120) [56.7, 83.3] | 75.0% (90/120) [62.5, 87.5] | 100% (by definition) | **75.0%** (90/120) [60.0, 87.5] |
+| Agrees with project rule, **parseable replies only** | **per-customer** | **58.8%** (53/100) [45.0, 71.7] | 70.8% (85/120) [56.7, 83.3] | 75.0% (90/120) [60.8, 87.5] | 100% (by definition) | **75.0%** (90/120) [60.0, 87.5] |
+| Agrees with project rule, all runs (unparseable = disagree) | ratio = per-cust. | 44.2% (53/120) [33.3, 55.0] | 70.8% (85/120) [56.7, 83.3] | 75.0% | 100% | 75.0% |
+| Intervention rate | ratio | 60.8% | 54.2% [39.2, 68.3] | 50.0% | 25.0% | 0% |
+| Recommended cost tier > model-expected value (uplift × $500) | per-customer | 21.7% [13.3, 31.7] | 1.7% (2/120) | 0% | 15.0% [5.0, 27.5] | 0% |
+| Playbook query names the customer's true top SHAP driver | per-customer | 70.8% [58.3, 83.3] | n/a (no tools) | n/a | n/a | n/a |
+| ROI tool called with the customer's true uplift (±0.01) | per-customer | 99.2% [97.5, 100] | n/a (no tools) | n/a | n/a | n/a |
+| Tool calls / latency | mean | 4.7 / 21.1 s | 0 / 5.0 s | 0 / 5.2 s | 0 / 0 s | 0 / 0 s |
 
 Two notes on the table itself, both corrections to the previous version of this file:
 - The Lost-Cause-or-Sleeping-Dog row previously printed 18.3% while labelling the row "(60 runs)". 18.3% is 22/**120** —
@@ -297,27 +329,35 @@ How to read the agreement rows:
 By customer type, the agent's agreement on parseable replies (ratio estimator, with the per-customer value beside it;
 CIs uncorrected and wide — each cell rests on 10 customers):
 
-| Customer type | Agrees with rule | Ratio [95% CI] | Per-customer [95% CI] |
-|---|---|---|---|
-| Persuadable | 27/28 | 96.4% [89.3, 100] | 96.7% [90.0, 100] |
-| Lost Cause | 15/17 | 88.2% [75.0, 100] | 91.7% [80.0, 100] |
-| Sleeping Dog | 7/27 | 25.9% [9.9, 46.2] | 31.7% [11.7, 55.0] |
-| Sure Thing | 4/28 | 14.3% [3.6, 25.9] | 15.0% [3.3, 26.7] |
+| Customer type | A: Agrees with rule | A: Ratio [95% CI] | A: Per-customer [95% CI] | B: Full prompt, no tools |
+|---|---|---|---|---|
+| Persuadable | 27/28 | 96.4% [89.3, 100] | 96.7% [90.0, 100] | 30/30 = 100% |
+| Lost Cause | 15/17 | 88.2% [75.0, 100] | 91.7% [80.0, 100] | 30/30 = 100% |
+| Sleeping Dog | 7/27 | 25.9% [9.9, 46.2] | 31.7% [11.7, 55.0] | 25/30 = 83.3% [66.7, 96.7] |
+| Sure Thing | 4/28 | 14.3% [3.6, 25.9] | 15.0% [3.3, 26.7] | 0/30 = 0% |
+
+Arm B's by-type pattern is instructive. Removing the tools while keeping the prompt fixes the Lost Cause and Sleeping Dog
+columns almost completely (100% and 83.3%, against 88.2% and 25.9% with tools) but leaves Sure Things at **0/30** — arm B
+intervenes on every Sure Thing, exactly as arm C does (29/30). So the Sure-Thing failure is a property of the *model and
+prompt*, untouched by tool access, while the Sleeping-Dog failure is the tool-driven one. Both arms without tools land at
+roughly the never-intervene baseline overall precisely because they trade a fixed Sure-Thing error for near-perfect
+do-not-contact behaviour.
 
 13 of the agent's 20 unparseable replies are on Lost Cause customers (Sleeping Dog 3, Persuadable 2, Sure Thing 2), so
 the Lost Cause row rests on the fewest parseable replies of any type. Across-seed std: agent valid-JSON 0.113,
 agreement 0.104 — a std over three correlated reruns of the same 40 customers, not a standard error.
 
 What this supports:
-- Run in the project's tool-using configuration — its full tool-sequencing prompt, six tools and up to five rounds —
-  this 7B model recommended contacting Sleeping Dogs in 20 of 30 runs, against 1 of 30 for the same model answering the
-  same facts in a single shot with no tools and a shorter prompt. **The design does not separate the effect of the tools
-  from the effect of the different prompt.** The no-tools system prompt is built by truncating `SYSTEM_PROMPT_BATCH` at
-  "Use the available tools" (`eval_sop/agent_eval.py:190-193`), which also removes the numbered 5-step
-  gather-then-recommend sequence (`src/agent_loop.py:36-41`); the agent arm additionally carries ~4.7 rounds of tool
-  output in its context. Three things differ at once, so this is a configuration contrast, not a tool ablation.
+- **Giving this 7B model its six tools is what makes it contact Sleeping Dogs.** With the project's full prompt held
+  fixed, adding the tools raises the Sleeping-Dog contact rate from 5 of 30 to 20 of 30 — **+0.50, 95% CI [0.23, 0.73]**,
+  paired on customer. The prompt difference that confounded the earlier two-arm comparison accounts for +0.13 at most and
+  its interval reaches zero. The three-arm design settles the attribution; the earlier "cannot separate tools from
+  prompt" caveat no longer applies.
+- The agent's 17% invalid-JSON rate is also tool-loop-specific, not prompt-driven: arm B shares the identical system
+  prompt and parsed 120/120.
 - The tool loop does carry the right numbers into the reasoning: the true uplift reaches the ROI tool in 99% of runs, and
-  the playbook is queried for the true top driver in 71%.
+  the playbook is queried for the true top driver in 71%. So the failure is not that the tools deliver bad data — they
+  deliver the right data, and the model then acts against the instruction it was given.
 - Tools did not improve agreement with the project's rule. On parseable replies the agent agrees less often than a
   trivial never-intervene policy.
 - One plausible mechanism, **not verified**: Sleeping Dogs often have a small positive uplift, and the ROI tool then
@@ -326,10 +366,13 @@ What this supports:
 What it does not support:
 - Any claim about the deployed agent (TypeScript, 12 tools, Supabase, a hosted larger model) or about retention outcomes.
 - Generalisation beyond one 7B model, 40 customers and three seeds.
-- Small cells: the per-type rates rest on 30 runs (10 customers) each.
-- **An attribution of the Sleeping-Dog gap to tools specifically.** The arms differ in prompt and in accumulated tool
-  output as well as in tool access, so the experiment cannot apportion the effect among the three. Isolating it needs a
-  third arm: the full tool-sequencing prompt, with the tools removed.
+- Small cells: the per-type rates rest on 30 runs (10 customers) each, and the decomposition on 10 Sleeping-Dog customers.
+- **A separation of tool *access* from the tool *output* in context.** Arm B removes the tools and the ~4.7 rounds of tool
+  output together, so the +0.50 is the effect of the whole tool loop, not of the function-calling capability alone. A
+  fourth arm — full prompt, no tools, but the tool results pasted into the user message — would split those two. The
+  prompt is now ruled out as the driver; this is the remaining ambiguity inside the +0.50.
+- **A size for the prompt effect.** +0.13 [0.000, 0.300] on 10 customers is consistent with zero and with a real effect
+  about a quarter the size of the tool effect. It is not evidence of no prompt effect.
 
 Other notes:
 - The rule baseline picks "High ($50–100)" interventions for customers whose model-expected value is under $50,
@@ -399,12 +442,17 @@ These are estimates from list-price ranges, not quotes, and nothing was spent.
    against uncalibrated, class-weighted outputs. Against a base-rate forecast the skill is ~4% (3.7% against
    segment-specific base rates)."
 4. (Agent, optional) "In a programmatic evaluation of my tool-using retention agent (40 customers × 3 seeds, local 7B
-   model): run in the project's tool-using configuration — its full tool-sequencing prompt, six tools and up to five
-   rounds — this 7B model recommended contacting Sleeping Dogs in 20 of 30 runs, against 1 of 30 for the same model
-   answering the same facts in a single shot with no tools and a shorter prompt. The design does not separate the effect
-   of the tools from the effect of the different prompt. On its parseable replies it agreed with the system's own
-   targeting rule 53% of the time (58.8% weighting customers equally rather than runs), below a trivial never-intervene
-   baseline (75%)."
+   model), I ran three arms to separate the effect of the tools from the effect of the prompt: the full agent; the same
+   prompt with the tools removed; and a shorter prompt with no tools. Giving the model its six tools is what makes it
+   contact customers the pipeline marks 'do not contact' — with the prompt held fixed, tool access raised Sleeping-Dog
+   contact from 5 of 30 runs to 20 of 30, a difference of +0.50 (95% CI 0.23–0.73, paired on customer); the prompt
+   difference accounted for +0.13 with an interval reaching zero. The tools delivered correct data — the true uplift
+   reached the ROI tool in 99% of runs — so the model was acting against its instruction on good inputs, not on bad
+   inputs. On its parseable replies the agent agreed with the system's own targeting rule 53% of the time (58.8%
+   weighting customers equally rather than runs), below a trivial never-intervene baseline (75%)."
+   - Precise scope: one 7B model, 40 customers, 3 seeds; the decomposition rests on 10 Sleeping-Dog customers and is
+     uncorrected for multiple comparisons. Removing the tools also removes the tool output from context, so the +0.50 is
+     the effect of the whole tool loop rather than of function-calling alone.
 
 ## 7. README corrections
 
@@ -454,6 +502,8 @@ Proposed, not applied:
 | 23 | `c7c1159` | Refreshed `eval_sop/results/uplift_hillstrom.log` and `uplift_hillstrom_run_info.json` from the 5,000-resample run | The tracked log and run-info must describe the committed CSVs, not the superseded run | `run_info.json` now records `n_boot: 5000`, `runtime_s: 3207.6`. `uplift_hillstrom_deciles.csv` and `uplift_hillstrom_summary.csv` are **unchanged**, which is the expected signature of a CI-only change | Same 29-line log format |
 | 24 | `c7c1159` | Added **`tests/test_known_defects.py`** — 9 reproduction tests pinning the three §9 defects | R2 #11. **Verified: the branch previously added no tests at all** (`git diff --stat 8e68bc6 HEAD -- tests/` was empty at `5057d59`) | Label leak (2 tests, one of which guards the eval harness's strip list against a new label spelling), silent CausalML fallback (2), noise-passing direction check (3, incl. a deterministic negated-risk-score case and a 35–65% band for the stochastic one so it is not flaky), plus the one working guard. `pytest -q` → **82 passed** | `src/` still unmodified; no existing test changed |
 
+| 25 | (this commit) | **Ran the third agent arm** — `eval_sop/agent_third_arm.py`, full `SYSTEM_PROMPT_BATCH` verbatim with the tools removed, 40 customers × 3 seeds, local `qwen2.5:7b`, 597 s, 0 infra errors. Added the paired decomposition to `agent_section4_figures.py`. **Rewrote §4's headline and SOP sentence 4, and dropped the "does not separate" caveat** | §4's strongest claim was confounded three ways (round-2 #13 could only label the confound, not resolve it). This arm holds the prompt fixed and removes only the tools, so A−B isolates tools and B−C isolates prompt | **It is the tools.** Arm B contacts Sleeping Dogs in 5/30 (0.17 [0.03, 0.33]) — near arm C's 1/30, far from arm A's 20/30. Paired on the 10 SD customers: tools **+0.500 [0.233, 0.733]** (excludes 0); prompt +0.133 [0.000, 0.300] (does not); both together +0.633 [0.400, 0.833]. Secondary finding: arm B parsed **120/120** against the agent's 100/120 on the *identical* prompt, so the 17% parse-failure rate is tool-loop-specific too. `agent_eval_third_arm_rows.csv`, `_raw_outputs.jsonl` (full replies, untruncated), `_run_info.json`, `agent_sleeping_dog_decomposition.csv` | Arms A and C untouched — the new arm is a separate script and separate files, so no existing artifact was re-run or altered. `src/` still unmodified |
+
 No change was made to `src/` or `dashboard/`, and no existing test was modified. `tests/test_known_defects.py` is new
 (round-2 #23), so the suite is now **82 passed** (`python -m pytest -q`), up from 73. `ruff check .` → all passed. Both
 were run before every commit in this phase.
@@ -481,10 +531,9 @@ intent. `src/` is still unmodified. This replaces "reproduced by inspection" wit
 - Paired bootstrap CI for the ensemble vs response-model Qini difference on Hillstrom.
 - Run the Criteo subsample. Run the agent eval on a second model and on the deployed TypeScript route (needs a hosted
   model; see the cost estimate). Human-rate `agent_eval_human_validation.csv`.
-- **Add the missing third agent arm: the full `SYSTEM_PROMPT_BATCH` (tool-sequencing instructions intact) with the tools
-  removed.** This is the only cheap way to separate the tool effect from the prompt effect behind the 20/30-vs-1/30
-  Sleeping-Dog result (§4). It needs no paid API — same local 7B model, 120 more runs, roughly 10 minutes — and it is the
-  single highest-value addition to section 4.
+- ~~Add the missing third agent arm~~ — **done** (round-2 #25, `eval_sop/agent_third_arm.py`). The tool effect is +0.50
+  [0.23, 0.73] with the prompt held fixed. What remains is a *fourth* arm to split tool access from tool output: full
+  prompt, no tools, but the tool results pasted into the user message. Also free and local, ~10 minutes.
 - Make the agent's JSON parsing tolerant of trailing text (src/agent_loop.py, the `json.loads(raw)` path). 17% of agent
   replies fail it. Not changed, because I have not inspected full replies and have no failing test. **Also raise or remove
   the `raw[:500]` truncation on the same line**: it is what makes 19 of the 20 failures impossible to re-adjudicate

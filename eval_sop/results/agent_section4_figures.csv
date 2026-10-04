@@ -18,6 +18,25 @@ agrees_with_rule_parseable_only::Sleeping Dog,agent,ratio,7,27,10,0.259259259259
 agrees_with_rule_parseable_only::Sleeping Dog,agent,percustomer,7,27,10,0.31666666666666665,0.11666666666666665,0.5499999999999999
 agrees_with_rule_parseable_only::Sure Thing,agent,ratio,4,28,10,0.14285714285714285,0.03571428571428571,0.25925925925925924
 agrees_with_rule_parseable_only::Sure Thing,agent,percustomer,4,28,10,0.15,0.03333333333333333,0.2670833333333311
+intervened_on_sleeping_dog,full_prompt_no_tools,ratio,5,30,10,0.16666666666666666,0.03333333333333333,0.3333333333333333
+intervened_on_sleeping_dog,full_prompt_no_tools,percustomer,5,30,10,0.16666666666666666,0.03333333333333333,0.3333333333333333
+intervened_on_lost_cause_or_sleeping_dog,full_prompt_no_tools,ratio,5,60,20,0.08333333333333333,0.016666666666666666,0.18333333333333332
+intervened_on_lost_cause_or_sleeping_dog,full_prompt_no_tools,percustomer,5,60,20,0.08333333333333333,0.016666666666666666,0.1833333333333333
+valid_final_json,full_prompt_no_tools,ratio,120,120,40,1.0,1.0,1.0
+valid_final_json,full_prompt_no_tools,percustomer,120,120,40,1.0,1.0,1.0
+agrees_with_rule_all_runs,full_prompt_no_tools,ratio,85,120,40,0.7083333333333334,0.5666666666666667,0.8333333333333334
+agrees_with_rule_all_runs,full_prompt_no_tools,percustomer,85,120,40,0.7083333333333333,0.5666666666666667,0.8333333333333333
+agrees_with_rule_parseable_only,full_prompt_no_tools,ratio,85,120,40,0.7083333333333334,0.5666666666666667,0.8333333333333334
+agrees_with_rule_parseable_only,full_prompt_no_tools,percustomer,85,120,40,0.7083333333333333,0.5666666666666667,0.8333333333333333
+intervention_rate,full_prompt_no_tools,ratio,65,120,40,0.5416666666666666,0.39166666666666666,0.6833333333333333
+agrees_with_rule_parseable_only::Persuadable,full_prompt_no_tools,ratio,30,30,10,1.0,1.0,1.0
+agrees_with_rule_parseable_only::Persuadable,full_prompt_no_tools,percustomer,30,30,10,1.0,1.0,1.0
+agrees_with_rule_parseable_only::Lost Cause,full_prompt_no_tools,ratio,30,30,10,1.0,1.0,1.0
+agrees_with_rule_parseable_only::Lost Cause,full_prompt_no_tools,percustomer,30,30,10,1.0,1.0,1.0
+agrees_with_rule_parseable_only::Sleeping Dog,full_prompt_no_tools,ratio,25,30,10,0.8333333333333334,0.6666666666666666,0.9666666666666667
+agrees_with_rule_parseable_only::Sleeping Dog,full_prompt_no_tools,percustomer,25,30,10,0.8333333333333333,0.6666666666666667,0.9666666666666666
+agrees_with_rule_parseable_only::Sure Thing,full_prompt_no_tools,ratio,0,30,10,0.0,0.0,0.0
+agrees_with_rule_parseable_only::Sure Thing,full_prompt_no_tools,percustomer,0,30,10,0.0,0.0,0.0
 intervened_on_sleeping_dog,no_tools_llm,ratio,1,30,10,0.03333333333333333,0.0,0.1
 intervened_on_sleeping_dog,no_tools_llm,percustomer,1,30,10,0.03333333333333333,0.0,0.1
 intervened_on_lost_cause_or_sleeping_dog,no_tools_llm,ratio,1,60,20,0.016666666666666666,0.0,0.05

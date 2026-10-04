@@ -2,8 +2,9 @@
 """Recompute every section-4 figure in RESULTS.md from the committed artifacts.
 
 Inputs (all committed):
-  results/agent_eval_rows.csv            one row per (approach, seed, customer)
-  results/agent_eval_raw_outputs.jsonl   the model replies / parsed outputs
+  results/agent_eval_rows.csv             one row per (approach, seed, customer)
+  results/agent_eval_raw_outputs.jsonl    the model replies / parsed outputs
+  results/agent_eval_third_arm_rows.csv   arm B (full prompt, no tools), if present
 
 This script exists so that no number in RESULTS.md section 4 is hand-computed.
 It covers the subset-restricted and parseable-only figures that
@@ -95,6 +96,12 @@ def row(out, label, subset, df, num_col, den_col, estimator):
 def main():
     rows_path = os.path.join(OUT, "agent_eval_rows.csv")
     d = pd.read_csv(rows_path)
+    # Arm B (full prompt, tools removed) lives in its own file because it was run
+    # separately -- adding it to agent_eval.py would have forced a re-run of the
+    # expensive agent arm. Scored by the same agent_eval.score, so it concatenates.
+    third = os.path.join(OUT, "agent_eval_third_arm_rows.csv")
+    if os.path.exists(third):
+        d = pd.concat([d, pd.read_csv(third)], ignore_index=True)
     d["one"] = 1.0
     d["valid_json"] = d["valid_json"].astype(bool)
     d["intervene"] = d["intervene"].astype(bool).astype(float)
@@ -112,7 +119,8 @@ def main():
     d = pd.concat([d, nv], ignore_index=True)
 
     out: list[dict] = []
-    for ap in ["agent", "no_tools_llm", "rule_based", "never_intervene"]:
+    arms = ["agent", "full_prompt_no_tools", "no_tools_llm", "rule_based", "never_intervene"]
+    for ap in [a for a in arms if (d.approach == a).any()]:
         g = d[d.approach == ap]
         sd = g[g.customer_type == "Sleeping Dog"]
         row(out, "intervened_on_sleeping_dog", ap, sd, "intervene", "one", "ratio")
@@ -144,6 +152,36 @@ def main():
 
     res = pd.DataFrame(out)
     res.to_csv(os.path.join(OUT, "agent_section4_figures.csv"), index=False)
+
+    # ── Three-arm decomposition of the Sleeping-Dog contact rate ──────────────
+    # A vs B isolates the tools (prompt held fixed); B vs C isolates the prompt
+    # (no tools in either). Paired on customer: the same 10 Sleeping Dogs appear
+    # in every arm, so the difference is bootstrapped over customers, not runs.
+    contrasts = []
+    if (d.approach == "full_prompt_no_tools").any():
+        sd_all = d[d.customer_type == "Sleeping Dog"]
+        per_cust = (sd_all.groupby(["approach", "customer_id"])["intervene"].mean().unstack(0))
+        pairs = [("agent", "full_prompt_no_tools", "tools (prompt held fixed)"),
+                 ("full_prompt_no_tools", "no_tools_llm", "prompt (no tools in either)"),
+                 ("agent", "no_tools_llm", "tools + prompt together (original confounded contrast)")]
+        rng = np.random.default_rng(BOOT_SEED)
+        cust_ids = per_cust.index.values
+        draws = [rng.integers(0, len(cust_ids), len(cust_ids)) for _ in range(N_BOOT)]
+        for hi, lo, what in pairs:
+            if hi not in per_cust or lo not in per_cust:
+                continue
+            diff = (per_cust[hi] - per_cust[lo]).values
+            point = float(diff.mean())
+            b = [float(diff[idx].mean()) for idx in draws]
+            ci_lo, ci_hi = np.percentile(b, [2.5, 97.5])
+            contrasts.append({"isolates": what, "higher_arm": hi, "lower_arm": lo,
+                              "rate_higher": float(per_cust[hi].mean()), "rate_lower": float(per_cust[lo].mean()),
+                              "difference": point, "ci_lo": float(ci_lo), "ci_hi": float(ci_hi),
+                              "n_customers": int(len(cust_ids)),
+                              "excludes_zero": bool(ci_lo > 0 or ci_hi < 0)})
+        pd.DataFrame(contrasts).to_csv(os.path.join(OUT, "agent_sleeping_dog_decomposition.csv"), index=False)
+        print("\n-- Sleeping-Dog decomposition (paired on customer, clustered bootstrap) --")
+        print(pd.DataFrame(contrasts).round(4).to_string(index=False))
 
     # Where do the agent's unparseable replies sit?
     ag = d[(d.approach == "agent") & (~d.valid_json)]

@@ -2,3 +2,7 @@ data/
 # Resume checkpoint for agent_eval.py: same rows as results/agent_eval_rows.csv and
 # results/agent_eval_raw_outputs.jsonl, regrouped per (seed, customer). Kept locally, not tracked.
 results/agent_eval_checkpoint_*.jsonl
+# Resume checkpoint for agent_third_arm.py: same rows as
+# results/agent_eval_third_arm_rows.csv plus the full raw replies, which are in
+# results/agent_eval_third_arm_raw_outputs.jsonl. Kept locally, not tracked.
+results/agent_eval_third_arm_checkpoint_*.jsonl
