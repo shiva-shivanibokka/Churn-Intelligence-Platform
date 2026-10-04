@@ -1,3 +1,4 @@
+# ruff: noqa: I001  -- import order is load-bearing: common.py puts ../src on sys.path before project modules are imported
 """Churn-model evaluation: reproduce the README holdout numbers, then add the
 baselines the README's claims need (base rate, global model, logistic
 regression) across several seeds, with bootstrap CIs.

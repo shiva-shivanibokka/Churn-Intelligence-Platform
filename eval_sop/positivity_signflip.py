@@ -1,3 +1,4 @@
+# ruff: noqa: I001  -- import order is load-bearing: common.py puts ../src on sys.path before project modules are imported
 """(a) Overlap / positivity diagnostics for the observational 'treatment' used
 on Cell2Cell, and (b) the sign-flip counterfactual: what the targeted set and
 the pipeline's own ROI estimate would be if the documented sign bug were still
@@ -99,7 +100,7 @@ def sign_flip(df, clv=500.0, cost=15.0):
     for name, u in versions.items():
         d = df[["CustomerID", "ChurnProbability", "Churn", "Treatment"]].copy()
         d["UpliftScore"] = u
-        d["CustomerType"] = [uplift_model.classify_customer_type(a, b) for a, b in zip(d.UpliftScore, d.ChurnProbability)]
+        d["CustomerType"] = [uplift_model.classify_customer_type(a, b) for a, b in zip(d.UpliftScore, d.ChurnProbability, strict=True)]
         d = uplift_model.estimate_intervention_roi(d, avg_clv=clv, intervention_cost=cost)
         p = d[d.CustomerType == "Persuadable"]
         sets[name] = set(p.CustomerID)

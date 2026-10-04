@@ -1,3 +1,4 @@
+# ruff: noqa: I001  -- import order is load-bearing: common.py puts ../src on sys.path before project modules are imported
 """How often does the pipeline's uplift direction check pass for pure noise?
 
 positivity_signflip.py showed ONE random-noise draw passing

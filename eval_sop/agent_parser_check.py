@@ -1,3 +1,4 @@
+# ruff: noqa: I001  -- import order is load-bearing: common.py puts ../src on sys.path before project modules are imported
 """Parser-symmetry check for agent_eval.py.
 
 agent_eval.py scores the agent with the project's own JSON parsing

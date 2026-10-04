@@ -1,3 +1,4 @@
+# ruff: noqa: I001  -- import order is load-bearing: common.py puts ../src on sys.path before project modules are imported
 """Small, programmatic evaluation of the retention agent against two baselines.
 
 Approaches (same 40 customers, stratified 10 per CustomerType, Cell2Cell):

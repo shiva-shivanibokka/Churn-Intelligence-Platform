@@ -1,3 +1,4 @@
+# ruff: noqa: I001  -- import order is load-bearing: common.py puts ../src on sys.path before project modules are imported
 """Held-out evaluation of the project's uplift learners on a real randomized
 experiment: the Hillstrom MineThatData e-mail challenge (64,000 customers,
 randomized 1/3 Mens e-mail, 1/3 Womens e-mail, 1/3 no e-mail).
