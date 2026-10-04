@@ -1,0 +1,14 @@
+{
+  "n_runs": 120,
+  "strict_parser_valid": 100,
+  "lenient_parser_valid_lower_bound": 101,
+  "lenient_parser_valid_upper_bound": 120,
+  "recovered_by_lenient": 1,
+  "invalid_under_both": 0,
+  "indeterminate_truncated_rows": 19,
+  "truncation_limit_chars": 500,
+  "note": "src/agent_loop.py keeps only the first 500 characters of a reply it cannot parse, so 19 of 120 agent runs cannot be re-parsed from the committed artifact. The lenient-parser validity for the agent arm is therefore bounded: 101/120 to 120/120, not a point estimate.",
+  "source": [
+    "results/agent_eval_raw_outputs.jsonl"
+  ]
+}

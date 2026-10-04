@@ -36,7 +36,7 @@ URL = "http://www.minethatdata.com/Kevin_Hillstrom_MineThatData_E-MailAnalytics_
 SHA256 = "0e5893329d8b93cefecc571777672028290ab69865718020c78c7284f291aece"
 DATA = os.path.join(os.path.dirname(__file__), "data", "hillstrom.csv")
 SEEDS = [42, 7, 13, 21, 99]
-N_BOOT = 500
+N_BOOT = 5000
 
 
 def load():

@@ -1,13 +1,13 @@
-visit seed 42 done (26s)
-visit seed 7 done (50s)
-visit seed 13 done (75s)
-visit seed 21 done (99s)
-visit seed 99 done (122s)
-conversion seed 42 done (147s)
-conversion seed 7 done (171s)
-conversion seed 13 done (196s)
-conversion seed 21 done (221s)
-conversion seed 99 done (246s)
+visit seed 42 done (445s)
+visit seed 7 done (715s)
+visit seed 13 done (1055s)
+visit seed 21 done (1373s)
+visit seed 99 done (1696s)
+conversion seed 42 done (1975s)
+conversion seed 7 done (2275s)
+conversion seed 13 done (2564s)
+conversion seed 21 done (2893s)
+conversion seed 99 done (3208s)
                                                            qini              auuc          uplift@10%          uplift@30%          test_ate     
                                                            mean      std     mean      std       mean      std       mean      std     mean  std
 outcome    model                                                                                                                                

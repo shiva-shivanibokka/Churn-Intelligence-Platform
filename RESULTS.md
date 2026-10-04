@@ -1,7 +1,9 @@
 # RESULTS: an independent evaluation for SOP use
 
 Branch `sop-eval`, based on `main` at `8e68bc6`.
-- **Unchanged:** `src/`, `dashboard/` and `tests/`.
+- **Unchanged:** `src/` and `dashboard/`. No existing test was modified.
+- **tests/:** one new file, `tests/test_known_defects.py` — 9 reproduction tests pinning the three section-9 defects so
+  they cannot regress, or be fixed, silently. Suite goes 73 → 82 passed.
 - **README.md:** two claims qualified (change log #6). The generated part of that change comes from `scripts/readme_metrics.py`.
 - **New:** all evaluation code and outputs are in `eval_sop/`.
 - **Agent evaluation (section 4):** run on a local 7B model with an 8k context and scored programmatically. No paid API
@@ -15,19 +17,22 @@ Branch `sop-eval`, based on `main` at `8e68bc6`.
 | Uplift data | Hillstrom MineThatData e-mail challenge, 64,000 rows, randomized (2/3 got an e-mail). Source: `http://www.minethatdata.com/Kevin_Hillstrom_MineThatData_E-MailAnalytics_DataMiningChallenge_2008.03.20.csv`, sha256 `0e5893…aece`, checked in code. Raw data is not committed (`eval_sop/.gitignore`). |
 | Python env | Python 3.12.3. Pinned in `eval_sop/requirements-eval.txt`: numpy 2.4.6, pandas 2.3.3, scikit-learn 1.8.0, catboost 1.2.10, xgboost 3.2.0, causalml 0.16.0, numba 0.65.1. |
 | Seeds | Churn: split and model seeds {42, 7, 13, 21, 99}. Hillstrom: split seeds {42, 7, 13, 21, 99}. The project's XGBoost learners keep their hard-coded `random_state=42`. |
-| CIs | 95% percentile bootstrap over held-out rows: 1,000 resamples (churn) and 500 (uplift). Agent CIs bootstrap over the 40 customers. The CIs capture test-set noise. The ± values are std across seeds. |
+| CIs | 95% percentile bootstrap over held-out rows: 1,000 resamples (churn) and **5,000 (uplift — raised from 500 in round-2 #12, because a conclusion rested on a bound of 2e-5 that was inside the Monte-Carlo error of 500)**. Agent CIs bootstrap over the 40 customers, clustered on customer. The CIs capture test-set noise only, and **none is corrected for multiple comparisons**. The ± values are std across seeds, which are overlapping splits of the same rows, so they are **not** standard errors (§5). |
 | Threads | All runs used `OMP_NUM_THREADS=2 MKL_NUM_THREADS=2`. `churn_eval.py` pins CatBoost `thread_count=2`; CatBoost output depends on it (see #5 below). |
 
 Reproduce (from the repo root, with the env above):
 
 ```
 OMP_NUM_THREADS=2 python eval_sop/churn_eval.py           # ~9 min; byte-identical CSVs across two runs
-OMP_NUM_THREADS=2 python eval_sop/uplift_hillstrom.py     # ~4 min (downloads + verifies Hillstrom if missing)
+OMP_NUM_THREADS=2 python eval_sop/uplift_hillstrom.py     # ~53 min at N_BOOT=5000 (downloads + verifies Hillstrom if missing)
 OMP_NUM_THREADS=2 python eval_sop/positivity_signflip.py  # <1 min
 OMP_NUM_THREADS=2 python eval_sop/direction_check_random.py   # <1 min
 OMP_NUM_THREADS=2 python eval_sop/agent_eval.py --scenarios-only   # writes scenario set, no LLM
 OMP_NUM_THREADS=2 python eval_sop/agent_eval.py --model qwen2.5:7b --seeds 0 1 2   # ~52 min, local Ollama
-OMP_NUM_THREADS=2 python eval_sop/agent_parser_check.py --model qwen2.5:7b          # ~10 min, parser-symmetry check
+OMP_NUM_THREADS=2 python eval_sop/agent_parser_check.py --agent             # <1 min, offline; agent-arm parser symmetry
+OMP_NUM_THREADS=2 python eval_sop/agent_parser_check.py --no-tools --model qwen2.5:7b   # ~10 min, no-tools arm
+OMP_NUM_THREADS=2 python eval_sop/agent_section4_figures.py   # <1 min, offline; every section-4 figure + CI
+python -m pytest -q                                           # 82 passed (73 existing + 9 defect-reproduction)
 ```
 
 **The README figures reproduce exactly.** With the project's own `churn_model.train_segment_model` and seed 42, every
@@ -38,7 +43,9 @@ per-segment holdout AUC and Brier pair matches the README table to the printed p
 ## 1. Churn model (Cell2Cell, pooled held-out set: n = 10,211 per seed)
 
 The test set is the union of the per-segment 80/20 stratified holdouts. Every model is trained on the same training
-rows and scored on the same test rows. Values are mean ± std over 5 seeds. The 95% bootstrap CIs come from seed 42.
+rows and scored on the same test rows. Values are mean ± std over 5 seeds — a std over five overlapping splits of the
+same rows, not a standard error (section 5). The 95% bootstrap CIs come from seed 42 and are **uncorrected** for
+multiple comparisons.
 Columns:
 - **Skill vs base rate:** Brier skill score against the constant training churn rate.
 - **Skill vs segment base rate:** a sensitivity check, against each segment's own training churn rate.
@@ -55,8 +62,8 @@ Columns:
 
 **Per-segment vs global, paired on the same test rows** (`churn_perseg_vs_global_paired.csv`):
 - ΔAUC (per-segment minus global) is −0.0068, −0.0062, −0.0120, −0.0109 and −0.0101 for seeds 42, 7, 13, 21 and 99.
-  **Every 95% CI excludes 0.**
-- ΔBrier is positive (per-segment worse) in 5/5 seeds, and every CI excludes 0.
+  **Every 95% CI excludes 0** (uncorrected, and the five seeds share most of their test rows).
+- ΔBrier is positive (per-segment worse) in 5/5 seeds, and every CI excludes 0 (uncorrected).
 - Within each of the 5 segments, the global model's mean AUC is higher than that segment's own model (e.g. At-Risk 0.683
   vs 0.674, Lapsed 0.574 vs 0.567).
 
@@ -85,32 +92,73 @@ The Qini coefficient is the area between the Qini curve and the random line, div
 customer averaged over targeting depths. **Random targeting has an expected Qini of 0.** The "random" row below is one
 random score per seed, shown only as a noise reference.
 
-| Targeting score | Qini (mean ± std, 5 seeds) | Qini seed 42 [95% CI] | Seeds with CI > 0 | Observed uplift in top 10% (seed 42) |
+**This normalisation is non-standard — do not compare these numbers to published Qini coefficients.** `common.py:113-122`
+divides the area between the curves by `n` (the test-set size), which keeps the units interpretable as "incremental
+visits per targeted customer, averaged over depths" and makes the figure comparable across the five seeds and the eight
+scores in the table — all of which share one `n`. It is not either common convention: published Qini coefficients are
+usually the *unnormalised* area (in whole incremental outcomes, so they scale with dataset size) or that area divided by
+the area of the *perfect-targeting* curve (giving a 0–1 efficiency ratio). An 0.0028 here is therefore roughly
+0.0028 × 19,200 ≈ 54 incremental visits of area on the unnormalised scale, and is **not** "a Qini of 0.0028" in the sense
+any paper or library reports. Every comparison drawn in this section is internal — between rows of this table and
+against the 0 of random targeting — which is what this scaling supports. All intervals below are **uncorrected** for
+multiple comparisons (80 of them in this section alone; see section 5).
+
+All figures below are from the **5,000-resample** re-run (`n_boot: 5000` in `uplift_hillstrom_run_info.json`, runtime
+3,208 s). The point estimates are byte-identical to the earlier 500-resample run — verified, max |Δqini| = 0.0 across all
+80 rows — which also re-confirms that run; only the interval bounds moved.
+
+| Targeting score | Qini (mean ± std, 5 seeds) | Qini seed 42 [95% CI] | Seeds with CI excluding 0 | Observed uplift in top 10% (seed 42) |
 |---|---|---|---|---|
-| Project T+S ensemble (as shipped) | **0.0028 ± 0.0008** | 0.0020 [0.0000, 0.0041] | **4/5** (seed 21 CI includes 0) | 0.087 [0.053, 0.122] |
-| Project S-learner (CausalML) | 0.0034 ± 0.0008 | 0.0030 [0.0011, 0.0049] | 5/5 | 0.108 |
-| Project T-learner (CausalML) | 0.0021 ± 0.0010 | 0.0013 [−0.0008, 0.0033] | 3/5 | 0.085 |
-| Project T-learner (custom fallback) | 0.0024 ± 0.0009 | 0.0013 [−0.0007, 0.0033] | 3/5 | 0.071 |
-| Random (expected 0) | observed −0.0005 ± 0.0005 | −0.0005 [−0.0023, 0.0013] | 0/5 | 0.050 |
-| "Churn-score" targeting (highest P(no visit)) | −0.0020 ± 0.0008 | −0.0008 | 0/5 | 0.051 |
-| Response model (highest P(visit)) | 0.0020 ± 0.0006 | 0.0011 | 3/5 | 0.076 |
-| Sign-flipped ensemble (= −ensemble, pre-fix bug) | −0.0028 ± 0.0009 | −0.0020 [−0.0040, 0.0000] | 0/5 | 0.065 |
+| Project T+S ensemble (as shipped) | **0.0028 ± 0.0008** | 0.0020 [−0.0000, 0.0040] | **3/5** (seeds 42 and 21 include 0) | 0.087 [0.052, 0.123] |
+| Project S-learner (CausalML) | 0.0034 ± 0.0007 | 0.0030 [0.0010, 0.0049] | 5/5 | 0.108 [0.072, 0.145] |
+| Project T-learner (CausalML) | 0.0020 ± 0.0010 | 0.0013 [−0.0008, 0.0033] | 3/5 | 0.085 [0.051, 0.119] |
+| Project T-learner (custom fallback) | 0.0024 ± 0.0009 | 0.0013 [−0.0007, 0.0034] | 3/5 | 0.071 [0.034, 0.108] |
+| Random (expected 0) | observed −0.0005 ± 0.0005 | −0.0005 [−0.0024, 0.0014] | 0/5 | 0.050 [0.020, 0.083] |
+| "Churn-score" targeting (highest P(no visit)) | −0.0020 ± 0.0008 | −0.0008 [−0.0027, 0.0012] | 3/5 (all below 0) | 0.051 [0.031, 0.068] |
+| Response model (highest P(visit)) | 0.0020 ± 0.0006 | 0.0011 [−0.0008, 0.0030] | 2/5 | 0.076 [0.038, 0.117] |
+| Sign-flipped ensemble (= −ensemble, pre-fix bug) | −0.0028 ± 0.0009 | −0.0020 [−0.0040, 0.0001] | 3/5 (all below 0) | 0.065 [0.032, 0.096] |
+
+**What the re-run changed, and why it was run.** At 500 resamples the ensemble's seed-42 lower bound was +2.5e-5 — a
+bound two orders of magnitude inside the Monte-Carlo error of 500 draws, which the table then rendered as `0.0000`. A
+conclusion ("4 of 5 seeds") rested on it, so the resample count was raised tenfold to settle it. **It settled against the
+earlier claim:** at 5,000 resamples that bound is **−2.6e-5**, i.e. the interval now includes zero, and the ensemble's
+Qini CI excludes zero in **3 of 5 seeds, not 4 of 5**. The response model likewise fell from 3/5 to 2/5. Nothing else in
+the table moved materially. The lesson is in the direction of the change: a bound that small was never evidence either
+way, and the "4 of 5" phrasing had given it the weight of a finding.
+
+**Two of the eight rows are not independent tests, and both are restatements of a row above them.**
+- The sign-flipped ensemble is `−ensemble` by construction (noted again in section 3).
+- The "churn-score" row is `1 − p_resp` (`uplift_hillstrom.py:84`), i.e. the **exact reverse ranking of the response
+  model**. Qini depends only on the ranking, so this row is the response-model row read from the bottom up; that it
+  scores below zero whenever the response model scores above zero is arithmetic, not evidence. It is kept because it is
+  the operational policy the README argues against ("e-mail everyone above 0.7"), and it does show that policy loses on
+  this data — but it is not an independent confirmation of the response-model result, and the two cannot be counted as
+  two findings.
 
 Ensemble vs response model (`uplift_hillstrom_by_seed.csv`): the ensemble's Qini is above the response model's in
 every seed by point estimate, but only marginally. Per seed the gap is +0.0009 (42), +0.0007 (7), +0.0010 (13),
 **+0.0001 (21, effectively a tie)** and +0.0015 (99). No paired CI was computed for this difference, so I claim no
 significant advantage over a response model.
 
-Uplift by decile (ensemble, mean over seeds, `uplift_hillstrom_deciles.csv`): the observed uplift falls from 0.086
-(decile 1) to 0.046 (decile 10). Ranking is monotone in coarse terms, but the spread is modest (1.9×) and
-non-monotone in places. On the secondary outcome (conversion, 0.9% base rate), no method's Qini CI excludes 0.
+Uplift by decile (ensemble, mean over seeds, `uplift_hillstrom_deciles.csv`): the observed uplift falls from 0.085
+(decile 1) to 0.046 (decile 10). Ranking is monotone in coarse terms, but the spread is modest (1.85×) and
+non-monotone in places (deciles 9 and 10 sit above 7 and 8).
+
+**On the secondary outcome (conversion, 0.9% base rate), no method's Qini CI excludes 0 — 0 of 40, in either
+direction.** This statement was *false* of the 500-resample artifact, where exactly one interval cleared zero: the
+response-model baseline at seed 99, lower bound +2.2e-5. At 5,000 resamples that bound is no longer above zero. It was
+the same kind of artefact as the ensemble's seed-42 bound — one marginal crossing out of 40 uncorrected intervals is
+precisely what noise produces — and the tenfold resample increase removed it. No project learner's CI excluded zero
+under either resample count.
 
 What this supports:
 - The project's meta-learners, run unchanged, recover some real treatment-effect heterogeneity on a randomized
-  experiment. The ensemble's Qini is above 0 in all 5 seeds by point estimate, with the CI excluding 0 in 4 of 5.
-- They roughly match a response model.
+  experiment. The ensemble's Qini is above 0 in all 5 seeds by point estimate, with the CI excluding 0 in **3 of 5**
+  (uncorrected). The S-learner is the stronger of the two components: 5 of 5.
+- They roughly match a response model, whose own CI excludes 0 in only 2 of 5 seeds.
 - Targeting the highest-risk customers (the "email everyone above 0.7" approach the README argues against) scores below 0
-  in all 5 seeds **by point estimate**. Its 95% CI lies entirely below 0 in only 3 of 5.
+  in all 5 seeds **by point estimate**. Its 95% CI lies entirely below 0 in only 3 of 5. This score is the reverse
+  ranking of the response model, so it is not an independent test of it.
 
 What it does not support:
 - A claim that the learners beat a response model.
@@ -166,54 +214,108 @@ selected. Its own reported numbers could not reveal the bug.
 - **Label leak stripped:** the harness drops the `actually_churned`, `churn` and `Churn` keys from every tool result. The segment-level
   `actual_churn_rate` aggregate is kept.
 - **No-tools LLM:** the same model and JSON contract, and the same facts the agent's first user message gets (segment,
-  churn probability, uplift, customer type, CLV), but no tools.
+  churn probability, uplift, customer type, CLV), but no tools. **This arm is not a clean tool ablation.** Its system
+  prompt is `SYSTEM_PROMPT_BATCH` truncated at "Use the available tools" (`agent_eval.py:190-193`), which also drops the
+  numbered 5-step gather-then-recommend sequence (`src/agent_loop.py:36-41`). So the two arms differ in tool access, in
+  prompt content, and in the ~4.7 rounds of tool output the agent accumulates. Read every agent-vs-no-tools comparison
+  below as a contrast between two whole configurations.
 - **Rule policy:** intervene iff Persuadable and NetROI > 0, using the playbook entry for the top signed SHAP driver.
 - **Never-intervene:** a trivial baseline that always outputs "do not intervene".
 - **Scenario set:** `eval_sop/agent_scenarios.csv`, 10 customers per CustomerType.
 - **Scoring:** programmatic. **There is no ground-truth retention outcome**, because Cell2Cell has no randomized intervention.
   "Agrees with rule" therefore means consistency with the project's own decision rule, not business value.
-- **Parsing:** the agent is parsed with the project's own parser. For symmetry the no-tools arm was re-run and parsed both ways:
-  100% valid under both (`agent_eval_no_tools_parser_check.csv`).
+- **Parsing (asymmetric, and only partly repairable).** The agent is scored with the project's **strict** parser
+  (`src/agent_loop.py:243` — strip fences, then `json.loads` the whole reply), the no-tools arm with the **lenient**
+  `parse_json` (`agent_eval.py:156-170` — strip `<think>`, then regex-extract the first `{...}`). Both arms are now
+  measured both ways:
+  - *No-tools arm* — re-run keeping the raw reply: **100% valid under both** parsers
+    (`agent_eval_no_tools_parser_check.csv`). The asymmetry costs this arm nothing.
+  - *Agent arm* — re-parsed offline from the committed replies
+    (`agent_parser_check.py --agent` → `agent_eval_agent_arm_parser_check.{csv,json}`): of the 20 strict-parser
+    failures, the lenient parser recovers **1**, and **19 of 120 runs cannot be decided at all**. The project's parser
+    stores only `raw_response = raw[:500]`, so all 20 recorded failures are truncated at exactly 500 characters; a reply
+    whose JSON object had not closed by then is unknown under the lenient parser, not invalid. The symmetric figure is
+    therefore a **bound, not a point estimate: agent lenient-parser validity is between 101/120 (84.2%) and 120/120**,
+    against 120/120 for the no-tools arm. Closing the gap needs a re-run that retains full replies, not a re-parse.
+  Every agreement figure below is computed under the strict parser for the agent and the lenient one for the no-tools
+  arm, i.e. as originally scored; the 19 indeterminate runs mean the agent's valid-JSON rate could be anywhere from
+  83.3% to 100% had it been scored leniently.
 - **Infrastructure errors:** none (0 excluded).
 
 **Headline: Sleeping Dogs.** These are customers the pipeline labels "do not contact", and the system prompt says not to intervene on them.
-- The agent with tools recommended an intervention for **20 of 30 Sleeping Dog runs (0.67; customer-bootstrap CI 0.43–0.87)**.
-- The same model without tools did so for **1 of 30 (0.03; CI 0.00–0.10)**.
+- The agent, in the project's tool-using configuration, recommended an intervention for **20 of 30 Sleeping Dog runs
+  (0.67; clustered-bootstrap CI 0.43–0.87, uncorrected)**.
+- The same model with no tools and the shorter prompt did so for **1 of 30 (0.03; CI 0.00–0.10, uncorrected)**.
 - The rule policy and never-intervene did so for 0 of 30.
+- Remember the confound: the two LLM arms differ in prompt as well as in tool access (see Setup).
 
-| Metric | Agent (tools) | No-tools LLM | Rule policy | Never-intervene |
-|---|---|---|---|---|
-| Intervened on a Sleeping Dog (30 runs each) | **0.67** (20/30) [0.43, 0.87] | 0.03 (1/30) [0.00, 0.10] | 0 | 0 |
-| Intervened on Lost Cause or Sleeping Dog (60 runs) | 18.3% [9.2, 29.2] | 0.8% [0, 2.5] | 0 | 0 |
-| Valid final JSON (project parser) | 83.3% (100/120) [75.0, 90.8] | 100% | 100% | 100% |
-| Agrees with project rule, **parseable replies only** | **53%** (53/100) [39, 67] | 75% (90/120) [62.5, 87.5] | 100% (by definition) | **75%** (90/120) [60, 87.5] |
-| Agrees with project rule, all runs (unparseable = disagree) | 44.2% (53/120) [33.3, 55.0] | 75% | 100% | 75% |
-| Intervention rate | 60.8% | 50.0% | 25.0% | 0% |
-| Recommended cost tier > model-expected value (uplift × $500) | 21.7% [13.3, 31.7] | 0% | 15.0% [5.0, 27.5] | 0% |
-| Playbook query names the customer's true top SHAP driver | 70.8% [58.3, 83.3] | n/a | n/a | n/a |
-| ROI tool called with the customer's true uplift (±0.01) | 99.2% [97.5, 100] | n/a | n/a | n/a |
-| Tool calls / latency | 4.7 / 21.1 s | 0 / 5.2 s | 0 / 0 s | 0 / 0 s |
+**Estimators, stated explicitly.** Two are in play, and on the parseable-only subset they differ by 5.8 points, so each
+row below names the one it uses:
+- **ratio** — `sum(numerator) / sum(denominator)` over runs. The run is the unit, so a customer with more parseable
+  replies gets more weight.
+- **per-customer** — the unweighted mean over the 40 customers of each customer's own rate. This is what `agent_eval.py`
+  writes to `agent_eval_summary_ci.csv`.
 
-How to read the agreement row:
+They coincide wherever every customer has the same denominator (all the 30-run and 120-run rows). They diverge only on
+the parseable-only rows, where the denominator varies by customer. All CIs are 95% percentile bootstrap, 2,000
+resamples, **clustered on customer** (a resample draws customers and keeps all their runs; the three seeds are reruns of
+the same 40 customers, so the customer is the independent unit). **No multiple-comparison correction is applied
+anywhere.** Every figure in this section is recomputed by `eval_sop/agent_section4_figures.py` →
+`agent_section4_figures.csv` + `_info.json`; where a row also exists in `agent_eval_summary_ci.csv` the two bootstraps
+agree to within ±0.01 on the bounds.
+
+| Metric | Estimator | Agent (tools) | No-tools LLM | Rule policy | Never-intervene |
+|---|---|---|---|---|---|
+| Intervened on a Sleeping Dog (/30 SD runs) | ratio = per-cust. | **0.67** (20/30) [0.43, 0.87] | 0.03 (1/30) [0.00, 0.10] | 0 (0/30) | 0 (0/30) |
+| Intervened on Lost Cause or Sleeping Dog (/60 LC+SD runs) | ratio = per-cust. | **36.7%** (22/60) [20.0, 55.0] | 1.7% (1/60) [0.0, 5.0] | 0 (0/60) | 0 (0/60) |
+| *Same event, /120 all runs (as `summary_ci.csv` reports it)* | ratio = per-cust. | 18.3% (22/120) [9.2, 29.2] | 0.8% (1/120) [0, 2.5] | 0 | 0 |
+| Valid final JSON (parser as scored) | ratio = per-cust. | 83.3% (100/120) [75.0, 90.8] | 100% (120/120) | 100% | 100% |
+| Agrees with project rule, **parseable replies only** | **ratio** | **53.0%** (53/100) [39.4, 66.7] | 75.0% (90/120) [62.5, 87.5] | 100% (by definition) | **75.0%** (90/120) [60.0, 87.5] |
+| Agrees with project rule, **parseable replies only** | **per-customer** | **58.8%** (53/100) [45.0, 71.7] | 75.0% (90/120) [60.8, 87.5] | 100% (by definition) | **75.0%** (90/120) [60.0, 87.5] |
+| Agrees with project rule, all runs (unparseable = disagree) | ratio = per-cust. | 44.2% (53/120) [33.3, 55.0] | 75.0% | 100% | 75.0% |
+| Intervention rate | ratio | 60.8% | 50.0% | 25.0% | 0% |
+| Recommended cost tier > model-expected value (uplift × $500) | per-customer | 21.7% [13.3, 31.7] | 0% | 15.0% [5.0, 27.5] | 0% |
+| Playbook query names the customer's true top SHAP driver | per-customer | 70.8% [58.3, 83.3] | n/a | n/a | n/a |
+| ROI tool called with the customer's true uplift (±0.01) | per-customer | 99.2% [97.5, 100] | n/a | n/a | n/a |
+| Tool calls / latency | mean | 4.7 / 21.1 s | 0 / 5.2 s | 0 / 0 s | 0 / 0 s |
+
+Two notes on the table itself, both corrections to the previous version of this file:
+- The Lost-Cause-or-Sleeping-Dog row previously printed 18.3% while labelling the row "(60 runs)". 18.3% is 22/**120** —
+  `agent_eval.py` scores that flag over every run, not over the 60 eligible ones. Both denominators are now shown and
+  labelled; 22/60 = 36.7% is the one comparable to the 20/30 Sleeping-Dog row above it.
+- The parseable-only agreement row previously mixed estimators with the row beneath it: 53% is the ratio estimator,
+  while the 44.2% below it is the committed per-customer mean. Under the per-customer estimator the parseable-only
+  figure is 58.8%. Both are now shown.
+
+How to read the agreement rows:
 - The rule intervenes on only the 10/40 Persuadables, so never intervening already agrees 75% of the time.
 - The no-tools LLM's 75% therefore does **not** beat the trivial baseline. Its disagreements are almost all Sure Things
   (it intervened on 29/30).
-- The agent's 53% on parseable replies is below both.
+- The agent is below both on parseable replies under **either** estimator (53.0% ratio, 58.8% per-customer), and its CI
+  overlaps the 75% baseline in both cases, so this is a direction, not a significant difference.
 
-By customer type, the agent's agreement on parseable replies is:
+By customer type, the agent's agreement on parseable replies (ratio estimator, with the per-customer value beside it;
+CIs uncorrected and wide — each cell rests on 10 customers):
 
-| Customer type | Agrees with rule |
-|---|---|
-| Persuadable | 27/28 |
-| Lost Cause | 15/17 |
-| Sleeping Dog | 7/27 |
-| Sure Thing | 4/28 |
+| Customer type | Agrees with rule | Ratio [95% CI] | Per-customer [95% CI] |
+|---|---|---|---|
+| Persuadable | 27/28 | 96.4% [89.3, 100] | 96.7% [90.0, 100] |
+| Lost Cause | 15/17 | 88.2% [75.0, 100] | 91.7% [80.0, 100] |
+| Sleeping Dog | 7/27 | 25.9% [9.9, 46.2] | 31.7% [11.7, 55.0] |
+| Sure Thing | 4/28 | 14.3% [3.6, 25.9] | 15.0% [3.3, 26.7] |
 
-13 of the agent's 20 unparseable replies are on Lost Cause customers. Across-seed std: agent valid-JSON 0.113, agreement 0.104.
+13 of the agent's 20 unparseable replies are on Lost Cause customers (Sleeping Dog 3, Persuadable 2, Sure Thing 2), so
+the Lost Cause row rests on the fewest parseable replies of any type. Across-seed std: agent valid-JSON 0.113,
+agreement 0.104 — a std over three correlated reruns of the same 40 customers, not a standard error.
 
 What this supports:
-- With tools, this 7B model intervened on customers the pipeline marks "do not contact" far more often than without
-  tools (0.67 vs 0.03 of Sleeping Dog runs).
+- Run in the project's tool-using configuration — its full tool-sequencing prompt, six tools and up to five rounds —
+  this 7B model recommended contacting Sleeping Dogs in 20 of 30 runs, against 1 of 30 for the same model answering the
+  same facts in a single shot with no tools and a shorter prompt. **The design does not separate the effect of the tools
+  from the effect of the different prompt.** The no-tools system prompt is built by truncating `SYSTEM_PROMPT_BATCH` at
+  "Use the available tools" (`eval_sop/agent_eval.py:190-193`), which also removes the numbered 5-step
+  gather-then-recommend sequence (`src/agent_loop.py:36-41`); the agent arm additionally carries ~4.7 rounds of tool
+  output in its context. Three things differ at once, so this is a configuration contrast, not a tool ablation.
 - The tool loop does carry the right numbers into the reasoning: the true uplift reaches the ROI tool in 99% of runs, and
   the playbook is queried for the true top driver in 71%.
 - Tools did not improve agreement with the project's rule. On parseable replies the agent agrees less often than a
@@ -225,6 +327,9 @@ What it does not support:
 - Any claim about the deployed agent (TypeScript, 12 tools, Supabase, a hosted larger model) or about retention outcomes.
 - Generalisation beyond one 7B model, 40 customers and three seeds.
 - Small cells: the per-type rates rest on 30 runs (10 customers) each.
+- **An attribution of the Sleeping-Dog gap to tools specifically.** The arms differ in prompt and in accumulated tool
+  output as well as in tool access, so the experiment cannot apportion the effect among the three. Isolating it needs a
+  third arm: the full tool-sequencing prompt, with the tools removed.
 
 Other notes:
 - The rule baseline picks "High ($50–100)" interventions for customers whose model-expected value is under $50,
@@ -246,6 +351,28 @@ These are estimates from list-price ranges, not quotes, and nothing was spent.
 - Segmentation (K-Means) was fit on all rows, holdout included. It is unsupervised and uses no labels, but it is mildly transductive.
 - One dataset for churn. The Cell2Cell feature mapping (e.g. CreditRating → "SatisfactionScore") is the project's, and I kept it as is.
 - The bootstrap CIs ignore training variance. The seed std covers part of it. Five seeds is few.
+- **The seeds are not independent, so the ± values are not standard errors.** Both eval scripts redraw a split of the
+  *same* rows per seed (`churn_eval.py:72`, `uplift_hillstrom.py:118`) rather than drawing fresh data. With a 20% churn
+  holdout, two seeds' test sets share about 20% of their rows in expectation; with Hillstrom's 30% holdout, about 30%.
+  Pooled across five seeds, nearly every row appears in several test sets. The across-seed std therefore measures
+  split-and-fit sensitivity on one fixed dataset, not sampling variability of the population, and it is biased low as an
+  estimate of the latter. Read every `± x` in this file as a stability indicator; do not divide it by √5, and do not
+  build a t-interval from it.
+- **No multiple-comparison control anywhere in this file.** Section 2 alone reports 80 nominal 95% intervals (8 scores ×
+  5 seeds × 2 outcomes); sections 1 and 4 add dozens more. At the nominal level, 5% of them are expected to exclude zero
+  by chance even if every underlying effect were null, which is roughly 4 of section 2's 80. Each interval is valid on
+  its own; the family is not, and no interval below is corrected. Where a conclusion rests on a single marginal CI, that
+  is said in place.
+- **No temporal validation is possible.** Neither dataset carries a calendar date, timestamp or cohort column. All 90
+  columns of `data/processed/segmented.parquet` are numeric or categorical with no datetime dtype; the only time-flavoured
+  fields are *durations* measured backwards from one unstated snapshot (`MonthsInService`, `DaySinceLastOrder`,
+  `CurrentEquipmentDays`), which order customers by tenure but give no common calendar axis to split on. Hillstrom's
+  columns (`recency, history_segment, history, mens, womens, zip_code, newbie, channel, segment, visit, conversion,
+  spend`) are likewise a single cross-section. Every split in this file is therefore stratified random, and each holdout
+  AUC is an *interpolation* estimate: how well the model scores customers
+  drawn from the same period as its training rows. It is not a forward-in-time estimate, and it is silent on drift,
+  seasonality, or the rolling retrain the deployed system would actually need. A production churn model should be
+  back-tested on later periods; nothing here does that, or can.
 - CatBoost results depend on `thread_count`. The eval pins it to 2. At the project default (-1) the global baselines
   differed by up to 0.0016 AUC (#5), which does not change any conclusion.
 - Hillstrom uses a different treatment, outcome and domain from churn retention. It validates the learners, not the Cell2Cell targeting.
@@ -259,20 +386,25 @@ These are estimates from list-price ranges, not quotes, and nothing was spent.
 
 1. "I re-evaluated my churn pipeline against baselines. On 10,211 held-out Cell2Cell customers, its calibrated
    per-segment CatBoost models reached AUC 0.63 (95% CI 0.62–0.64), but a single global model trained the same way was
-   slightly and consistently better (ΔAUC −0.006 to −0.012 across five seeds, every paired CI excluding zero). I have
-   corrected my project README accordingly."
-   - Precise scope: the README correction is on branch `sop-eval`, not yet merged.
-2. "On the randomized Hillstrom e-mail experiment (19,200 held-out customers), my uplift learners' Qini was above
-   random (expected 0) in all five seeds (0.0028 ± 0.0008), with the 95% CI excluding zero in four of five. They were
-   only marginally above a plain response model, and tied with it in one seed. Targeting by predicted risk scored below
-   zero in all five seeds by point estimate, with the CI entirely below zero in three of five."
+   slightly and consistently better (ΔAUC −0.006 to −0.012 across five seeds, every paired CI excluding zero,
+   uncorrected for multiple comparisons). I have corrected my project README accordingly."
+   - Precise scope: the README correction is on branch `sop-eval`, not yet merged. The five seeds are overlapping splits
+     of the same rows, so the across-seed spread is not a standard error.
+2. "On the randomized Hillstrom e-mail experiment (19,200 held-out customers), my uplift learners' Qini was positive in
+   all five seeds (0.0028 ± 0.0008 — a spread across correlated splits of the same rows, not a standard error), and the
+   95% bootstrap CI excluded zero in three of five seeds (5,000 resamples, uncorrected for multiple comparisons). They
+   were only marginally above a plain response model, and tied with it in one seed. Targeting by predicted risk — the
+   exact reverse of the response-model ranking, so not an independent test — scored below zero in all five seeds."
 3. "Isotonic calibration cut expected calibration error from 0.20 to 0.015. The 17% Brier reduction I reported was
    against uncalibrated, class-weighted outputs. Against a base-rate forecast the skill is ~4% (3.7% against
    segment-specific base rates)."
 4. (Agent, optional) "In a programmatic evaluation of my tool-using retention agent (40 customers × 3 seeds, local 7B
-   model), giving the model tools made it recommend contacting customers the pipeline marks 'do not contact' (Sleeping
-   Dogs) in 20 of 30 runs, against 1 of 30 without tools. On its parseable replies it agreed with the system's own
-   targeting rule 53% of the time, below a trivial never-intervene baseline (75%)."
+   model): run in the project's tool-using configuration — its full tool-sequencing prompt, six tools and up to five
+   rounds — this 7B model recommended contacting Sleeping Dogs in 20 of 30 runs, against 1 of 30 for the same model
+   answering the same facts in a single shot with no tools and a shorter prompt. The design does not separate the effect
+   of the tools from the effect of the different prompt. On its parseable replies it agreed with the system's own
+   targeting rule 53% of the time (58.8% weighting customers equally rather than runs), below a trivial never-intervene
+   baseline (75%)."
 
 ## 7. README corrections
 
@@ -300,23 +432,63 @@ Proposed, not applied:
 | 7 | `0e098db` | Added `direction_check_random.py` | Reviewer: "passes for random noise" was one draw | 98/200 draws pass (49%, Wilson 42–56%) | — |
 | 8 | `53bc9e3` | Added `eval_sop/requirements-eval.txt` | Reviewer: no lock file for the eval env | Versions read from the venv used for every run | Repo `requirements.txt` untouched |
 | 9 | `57d133e` | `eval_sop/*.py`: per-file `# ruff: noqa: I001` and `zip(strict=True)` | CI runs `ruff check .`. Main passes, but eval_sop added 7 errors, which would have failed CI on merge | `ruff check .` → all passed. Re-running `positivity_signflip.py` and `agent_eval.py --scenarios-only` produced byte-identical outputs | Import order kept (it is load-bearing) |
-| 10 | (this commit) | RESULTS.md rewritten for the review fixes | Reviewer items 2, 3, 4, 6 | Numbers above, from the committed CSVs | — |
+| 10 | `5057d59` | RESULTS.md rewritten for the review fixes | Reviewer items 2, 3, 4, 6 | Numbers above, from the committed CSVs | — |
 
-No change was made to `src/`, `tests/` or `dashboard/`. The existing test suite (`python -m pytest -q` → 73 passed) was
-run before every commit in this phase.
+### Round-2 review (independent reviewer: PASS-WITH-FIXES). Every claim was re-verified against the committed artifacts before the wording was touched.
+
+| # | Commit | Change | Why | Evidence | Preserved |
+|---|---|---|---|---|---|
+| 11 | (this commit) | §2 conversion sentence. **The reviewer was right about the committed 500-resample artifact and the re-run then superseded the finding**, so the prescribed replacement wording was *not* applied verbatim — it would have been false of the new artifacts | R2 #1 | At 500 boots exactly one of the 40 conversion rows had `qini_lo > 0`: `baseline_response_model`, seed 99, `qini_lo` = **+2.196e-5** — reviewer verified correct. At 5,000 boots that bound is no longer above zero and **0 of 40 conversion CIs exclude zero in either direction**, which makes the original sentence true as written. §2 now states the figure *and* records that it was false at 500 resamples, so the correction is visible rather than silently reverted | The original sentence, now re-earned rather than assumed |
+| 12 | (this commit) | **Raised `N_BOOT` 500 → 5,000** in `uplift_hillstrom.py` and re-ran the whole uplift analysis — **the reviewer's preferred route, taken; the fallback wording was not needed**. Runtime 3,208 s | R2 #2. The "4 of 5 seeds" claim rested on seed 42's ensemble `qini_lo` = +2.487e-5, two orders of magnitude inside the Monte-Carlo error of 500 resamples, and the table rendered it as `0.0000` | Verified the bound first (+2.487e-5 at 500 boots). **The re-run settled it against the earlier claim:** that bound is **−2.6e-5** at 5,000 resamples, so the ensemble's CI excludes zero in **3 of 5 seeds, not 4 of 5**; the response model fell 3/5 → 2/5. All 80 point estimates reproduced **byte-identically** (max \|Δqini\| = 0.0), which independently re-verifies the original run and confirms only the bounds moved. §2, SOP sentence 2 and the "what this supports" bullets all updated to 3/5 | Seeds, splits, features, learners and model order unchanged; the 500-boot CSV was kept outside the repo for the comparison only |
+| 13 | (this commit) | **Reworded the §4 tools claim and SOP sentence 4** to a configuration contrast, not a tool ablation | R2 #3. **Verified, reviewer correct** | `agent_eval.py:190-193` builds the no-tools prompt as `SYSTEM_PROMPT_BATCH.split("Use the available tools")[0]`, which also drops the numbered 5-step sequence at `src/agent_loop.py:36-41`; the agent arm additionally carries ~4.7 rounds of tool output. Three differences, one comparison | The 20/30 vs 1/30 counts, which are correct as counts |
+| 14 | (this commit) | Extended `agent_parser_check.py` with an **offline `--agent` half** applying the lenient parser to the agent arm's 20 strict-parser failures | R2 #4. **Verified, reviewer correct about the asymmetry; the repair is only partly possible** | `src/agent_loop.py:243` is strict, `agent_eval.py:156-170` lenient. New result: 1 of 20 recovered, **19 of 120 runs indeterminate** — all 20 recorded `raw_response` values are exactly 500 chars because the project's parser stores `raw[:500]`, so a reply whose JSON had not closed is *unknown*, not invalid. Reported as a bound (101/120 to 120/120), not a point. `agent_eval_agent_arm_parser_check.{csv,json}` | The no-tools half and its CSV, unchanged |
+| 15 | (this commit) | Added **`agent_section4_figures.py`**, which recomputes every §4 figure (clustered bootstrap over customers) and writes `agent_section4_figures.csv` + `_info.json` | R2 #5. **Verified, reviewer correct** — the Sleeping-Dog rate, the no-tools rate, the parseable-only agreement, the never-intervene CI and the by-type table had no committed script (`agent_eval_summary_ci.csv` holds neither the subset-restricted nor the parseable-only rows, and has no never-intervene arm) | Reproduces every quoted figure: 0.67 [0.433, 0.867], 0.033 [0.000, 0.100], 53.0% [0.394, 0.667], never-intervene [0.600, 0.875], by-type 27/28, 15/17, 7/27, 4/28. Rows that also exist in `agent_eval_summary_ci.csv` agree to within ±0.01 on the bounds (independent bootstrap draws) | Original CSVs untouched; the new script only reads them |
+| 16 | (this commit) | **Labelled the estimator on every §4 row** and showed both where they differ | R2 #5, second half. **Verified, reviewer correct, including the 0.5875 figure** | Confirmed: §4's parseable-only row was the ratio estimator (53/100 = 0.530) directly above the committed per-customer mean (0.4417), undisclosed. Under the per-customer estimator the parseable-only figure is **0.5875**. Both now appear, each labelled, and the conclusion holds under either | Both numbers; neither is dropped in favour of the other |
+| 17 | (this commit) | **Correction the review did not flag:** the "Lost Cause or Sleeping Dog" row printed 18.3% while labelling itself "(60 runs)" | Found while verifying R2 #5. 18.3% is 22/**120** — `agent_eval.py` averages that flag over all runs, not the 60 eligible ones, so the row was inconsistent with the 20/30 row above it | 22/60 = 36.7% [20.0, 55.0]; 22/120 = 18.3% [9.2, 29.2]. Both denominators now shown and labelled | The committed 18.3% is kept, as the figure `summary_ci.csv` reports |
+| 18 | (this commit) | §5: **the seeds are not independent**, so `± std` is not a standard error | R2 #6. **Verified** | `churn_eval.py:72` and `uplift_hillstrom.py:118` both `train_test_split` the *same* rows per seed. Overlap is ~20% (churn, 20% holdout) and ~30% (Hillstrom) between any two seeds' test sets | All `±` values; only their interpretation changed |
+| 19 | (this commit) | Added **"uncorrected"** wherever many CIs are reported (§1, §2, §4, §5, SOP sentence 1) | R2 #7. **Verified: no multiple-comparison control exists anywhere in the eval code.** §2 alone is 80 nominal intervals (8 scores × 5 seeds × 2 outcomes), of which ~4 would exclude zero by chance under a global null | Counted directly from `uplift_hillstrom_by_seed.csv` (80 rows) | No interval was recomputed or widened; they are valid individually |
+| 20 | (this commit) | §5: **no temporal validation is possible** | R2 #8. **Verified** | No datetime dtype in any of the 90 columns of `data/processed/segmented.parquet`; the time-flavoured fields (`MonthsInService`, `DaySinceLastOrder`, `CurrentEquipmentDays`) are durations from one unstated snapshot, not calendar dates. Hillstrom's 12 columns are a single cross-section | — |
+| 21 | (this commit) | §2 + SOP sentence 2: the **churn-score row is the reverse ranking of the response model**, so not an independent test | R2 #9. **Verified** | `uplift_hillstrom.py:84`: `"baseline_churn_score (highest P(no visit))": 1 - p_resp`. Qini depends only on the ranking, so this row is the response-model row inverted | The row itself, which is still the operational policy the README argues against |
+| 22 | (this commit) | §2: the **Qini normalisation is non-standard**, so 0.0028 is not comparable to published coefficients | R2 #10. **Verified** | `common.py:113-122` divides the area between the curves by `n`. Published Qini is normally the unnormalised area or the area ÷ perfect-targeting area. Added the conversion (≈54 incremental visits of area at n = 19,200) | The metric and every internal comparison, which the scaling supports |
+| 23a | (this commit) | §2 decile sentence: 0.086 → **0.085**, "1.9×" → **1.85×** | Found in a fidelity pass over every §2 number against the CSVs; not raised by the review | `uplift_hillstrom_deciles.csv`, ensemble, visit, mean over seeds: decile 1 = 0.08548, decile 10 = 0.04621, ratio 1.850. The CSV is unchanged by the re-run, so this was a pre-existing rounding slip | The substantive point (modest, partly non-monotone spread), now with the non-monotonicity named |
+| 23 | (this commit) | Refreshed `eval_sop/results/uplift_hillstrom.log` and `uplift_hillstrom_run_info.json` from the 5,000-resample run | The tracked log and run-info must describe the committed CSVs, not the superseded run | `run_info.json` now records `n_boot: 5000`, `runtime_s: 3207.6`. `uplift_hillstrom_deciles.csv` and `uplift_hillstrom_summary.csv` are **unchanged**, which is the expected signature of a CI-only change | Same 29-line log format |
+| 24 | (this commit) | Added **`tests/test_known_defects.py`** — 9 reproduction tests pinning the three §9 defects | R2 #11. **Verified: the branch previously added no tests at all** (`git diff --stat 8e68bc6 HEAD -- tests/` was empty at `5057d59`) | Label leak (2 tests, one of which guards the eval harness's strip list against a new label spelling), silent CausalML fallback (2), noise-passing direction check (3, incl. a deterministic negated-risk-score case and a 35–65% band for the stochastic one so it is not flaky), plus the one working guard. `pytest -q` → **82 passed** | `src/` still unmodified; no existing test changed |
+
+No change was made to `src/` or `dashboard/`, and no existing test was modified. `tests/test_known_defects.py` is new
+(round-2 #23), so the suite is now **82 passed** (`python -m pytest -q`), up from 73. `ruff check .` → all passed. Both
+were run before every commit in this phase.
 
 ## 9. Proposed, not done
 
+**All three defects below are now pinned by reproduction tests** in `tests/test_known_defects.py` (9 tests, the only
+tests this branch adds). They assert the *current, defective* behaviour, so a silent regression is impossible in either
+direction: if someone fixes a defect, the matching test fails and has to be updated in the same commit, which is the
+intent. `src/` is still unmodified. This replaces "reproduced by inspection" with "reproduced in CI".
+
 - Remove `actually_churned` from `src/agent_tools.py:204`, and select explicit columns in `route.ts` `lookup_customer_details`
-  (label leakage to the LLM). I reproduced it by inspection and by a direct call to the tool; there is no failing test in `tests/`.
+  (label leakage to the LLM). Pinned by `test_lookup_customer_details_leaks_realized_label`, plus
+  `test_lookup_customer_details_has_no_other_label_key`, which fails if a future change adds a second spelling of the
+  label that would slip past the eval harness's strip list.
 - Make `src/uplift_model.py` fail loudly, not fall back, when CausalML cannot be imported. Reproduced: importing it in an
-  env with numpy 2.5 logs "CausalML not available — using custom T-learner fallback" and continues.
+  env with numpy 2.5 logs "CausalML not available — using custom T-learner fallback" and continues. Pinned by
+  `test_causalml_fallback_is_silent_in_the_return_value` (the metrics dict never names the estimator that ran, so a
+  caller cannot tell which one produced the numbers) and `test_causalml_import_failure_only_warns`.
+- The direction check's lack of power is pinned by `test_direction_check_passes_for_pure_noise_about_half_the_time`
+  (asserts a 35–65% band, not a point, so it is not flaky) and the deterministic
+  `test_direction_check_passes_for_negated_churn_probability`. Its one working guard — abstaining below 100 treated rows
+  — is pinned too, so it is not lost in a rewrite.
 - Replace the Cell2Cell treatment proxy, or drop `Complain` from it, and add a held-out Qini to the pipeline.
 - Paired bootstrap CI for the ensemble vs response-model Qini difference on Hillstrom.
 - Run the Criteo subsample. Run the agent eval on a second model and on the deployed TypeScript route (needs a hosted
   model; see the cost estimate). Human-rate `agent_eval_human_validation.csv`.
+- **Add the missing third agent arm: the full `SYSTEM_PROMPT_BATCH` (tool-sequencing instructions intact) with the tools
+  removed.** This is the only cheap way to separate the tool effect from the prompt effect behind the 20/30-vs-1/30
+  Sleeping-Dog result (§4). It needs no paid API — same local 7B model, 120 more runs, roughly 10 minutes — and it is the
+  single highest-value addition to section 4.
 - Make the agent's JSON parsing tolerant of trailing text (src/agent_loop.py, the `json.loads(raw)` path). 17% of agent
-  replies fail it. Not changed, because I have not inspected full replies (the stored `raw_response` is cut at 500 chars) and
-  have no failing test.
+  replies fail it. Not changed, because I have not inspected full replies and have no failing test. **Also raise or remove
+  the `raw[:500]` truncation on the same line**: it is what makes 19 of the 20 failures impossible to re-adjudicate
+  offline (section 4, Parsing), so the symmetric parser comparison for the agent arm is a bound rather than a number. The
+  truncation costs more in lost evidence than it saves in artifact size.
 - Cleanup: the evaluation venv lives at `%TEMP%\sopvenv` (outside the repo, because of the Windows MAX_PATH limit under the
   scratchpad). It can be deleted after review.
