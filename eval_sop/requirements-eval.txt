@@ -1,0 +1,19 @@
+# Environment used for eval_sop/ (venv with --system-site-packages over anaconda; numpy overridden).
+# Python 3.12.3 Windows 11
+# Generated with importlib.metadata; install with: pip install -r eval_sop/requirements-eval.txt
+# Note: repo requirements.txt pins numpy<2.1; this eval used numpy 2.4.6 (numba needs <=2.4). Not tested at the pin.
+numpy==2.4.6
+pandas==2.3.3
+scikit-learn==1.8.0  # importlib.metadata returned None; version from sklearn.__version__
+scipy==1.17.1
+catboost==1.2.10
+xgboost==3.2.0
+causalml==0.16.0
+numba==0.65.1
+pyarrow==23.0.1
+joblib==1.5.3
+mlflow==3.11.1
+openai==2.31.0
+pytest==9.0.3
+fastapi==0.139.0
+httpx==0.28.1
