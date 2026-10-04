@@ -55,6 +55,32 @@ def load() -> tuple[dict, pd.DataFrame, dict, dict]:
     return segment_models, df, stability, uplift_metrics
 
 
+def base_rate_skill(segment_models: dict) -> tuple[float, float]:
+    """Brier skill of the calibrated models against a constant base-rate forecast.
+
+    The Brier reduction above compares calibrated with *uncalibrated, class-weighted*
+    probabilities, which is a statement about calibration, not about skill. Skill is
+    measured against the trivial forecast: the training churn rate, pooled over all
+    segments' holdout rows (and, as a sensitivity, each segment's own training rate).
+    """
+    ys, ps, seg_rates = [], [], []
+    n_train = n_churn = 0
+    for md in segment_models.values():
+        if not md:
+            continue
+        y = np.asarray(md["y_test"])
+        ys.append(y)
+        ps.append(md["calibrated_clf"].predict_proba(md["X_test"])[:, 1])
+        seg_rates.append(np.full(len(y), md["metrics"]["churn_rate_train"]))
+        n_train += md["metrics"]["n_train"]
+        n_churn += md["metrics"]["n_churners_train"]
+    y, p, s = np.concatenate(ys), np.concatenate(ps), np.concatenate(seg_rates)
+    brier = np.mean((p - y) ** 2)
+    pooled = 1 - brier / np.mean((n_churn / n_train - y) ** 2)
+    per_segment = 1 - brier / np.mean((s - y) ** 2)
+    return float(pooled), float(per_segment)
+
+
 def build_section() -> str:
     segment_models, df, stability, uplift = load()
 
@@ -68,6 +94,7 @@ def build_section() -> str:
     mean_train = float(np.mean([m["train_auc"] for m in metrics]))
     brier_raw = float(np.mean([m["holdout_brier_uncalibrated"] for m in metrics]))
     brier_cal = float(np.mean([m["holdout_brier"] for m in metrics]))
+    bss_pooled, bss_seg = base_rate_skill(segment_models)
 
     churn_by_seg = df.groupby("Segment")["Churn"].mean()
     counts = df["Segment"].value_counts()
@@ -115,7 +142,11 @@ giving each model a fifth of the rows and a narrower slice of variation.
 ### What calibration is worth
 
 **Brier {brier_raw:.4f} → {brier_cal:.4f}** on held-out rows, a
-{(1 - brier_cal / brier_raw) * 100:.0f}% reduction. Calibration cannot change
+{(1 - brier_cal / brier_raw) * 100:.0f}% reduction relative to the uncalibrated, class-weighted
+outputs. Against a constant base-rate forecast the calibrated models' Brier skill
+is {bss_pooled * 100:.1f}% ({bss_seg * 100:.1f}% against each segment's own base rate), so
+calibration makes the probabilities honest; it does not make the model a strong
+predictor. Calibration cannot change
 AUC — it is a monotone map, so the ranking is identical by construction — which
 is exactly why the pair of Brier scores is the number that means anything.
 

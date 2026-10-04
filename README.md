@@ -92,7 +92,7 @@ flowchart TD
 
 **Why it's shaped this way:**
 
-- **Per-segment models over a global model.** A Champion and a Lapsed customer churn for fundamentally different reasons. Separate CatBoost classifiers per cohort capture segment-specific dynamics. This mirrors Salesforce Einstein's per-tier health scoring.
+- **Per-segment models over a global model.** A Champion and a Lapsed customer churn for fundamentally different reasons. Separate CatBoost classifiers per cohort capture segment-specific dynamics. This mirrors Salesforce Einstein's per-tier health scoring. *Measured, it did not pay off on Cell2Cell:* a single global CatBoost trained the same way on the same rows scored 0.006–0.012 higher pooled holdout AUC in all five seeds tested, with paired 95% CIs excluding zero (`eval_sop/` and `RESULTS.md` on the `sop-eval` branch).
 - **Isotonic calibration over raw probabilities.** These models are trained with `class_weights=[1, pos_weight]` to handle imbalance, which inflates the positive class *by construction* — so a raw score of 0.7 is not a 70% chance of churn. That matters because the score is then multiplied by CLV to rank retention spend, which is exactly the case where an uncalibrated probability costs money. Isotonic is fitted on a held-out slice and preferred over Platt scaling for non-parametric distributions.
 
   The claim used to be false. `calibrated_clf` was a plain alias for the base model, on the reasoning that CatBoost is well calibrated natively — which ignores the class weighting, and which nothing checked because every call site read `model_dict["calibrated_clf"]` and so looked calibrated either way. `holdout_brier_uncalibrated` and `holdout_brier` are now both recorded, so it is a measurement.
@@ -729,7 +729,11 @@ giving each model a fifth of the rows and a narrower slice of variation.
 ### What calibration is worth
 
 **Brier 0.2342 → 0.1946** on held-out rows, a
-17% reduction. Calibration cannot change
+17% reduction relative to the uncalibrated, class-weighted
+outputs. Against a constant base-rate forecast the calibrated models' Brier skill
+is 4.0% (3.5% against each segment's own base rate), so
+calibration makes the probabilities honest; it does not make the model a strong
+predictor. Calibration cannot change
 AUC — it is a monotone map, so the ranking is identical by construction — which
 is exactly why the pair of Brier scores is the number that means anything.
 
