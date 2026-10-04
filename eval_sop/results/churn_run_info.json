@@ -6,6 +6,7 @@
     21,
     99
   ],
+  "catboost_thread_count": 2,
   "n_rows": 51047,
   "features": [
     "Tenure",
@@ -87,5 +88,5 @@
     "Occupation",
     "MaritalStatus"
   ],
-  "runtime_s": 1012.2
+  "runtime_s": 530.2
 }

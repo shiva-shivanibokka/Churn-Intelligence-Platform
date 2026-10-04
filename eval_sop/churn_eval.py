@@ -33,6 +33,10 @@ from cell2cell_features import get_cell2cell_feature_sets  # noqa: E402
 
 logging.basicConfig(level=logging.WARNING)
 SEEDS = [42, 7, 13, 21, 99]
+# CatBoost's results depend on thread_count (the project default is -1 = all cores), so the
+# eval pins it. The seed-42 reproduction of the README still calls the project's own
+# train_segment_model, which keeps thread_count=-1, exactly as the README numbers were made.
+THREAD_COUNT = 2
 FEATS = get_cell2cell_feature_sets()["churn_model"]
 
 README_HOLDOUT_AUC = {  # copied from README.md "Per-segment churn models" table
@@ -51,6 +55,7 @@ def fit_catboost_calibrated(X, y, seed):
     neg, pos = (y == 0).sum(), (y == 1).sum()
     params = churn_model.get_catboost_params(max(1.0, neg / pos))
     params["random_seed"] = seed
+    params["thread_count"] = THREAD_COUNT
     clf = CatBoostClassifier(**params)
     clf.fit(X_fit, y_fit, eval_set=(X_cal, y_cal), early_stopping_rounds=50, use_best_model=True)
     iso = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
@@ -71,6 +76,10 @@ def run_seed(df, seed, raw_cols):
     tr, te = df.loc[train_idx], df.loc[test_idx]
     y_te = te["Churn"].values
     base_rate = float(tr["Churn"].mean())
+    # Sensitivity: a per-segment base-rate forecast (each test row gets its segment's train churn rate)
+    seg_rate = tr.groupby("Segment")["Churn"].mean()
+    p_segrate = te["Segment"].map(seg_rate).values.astype(float)
+    brier_segrate = float(np.mean((p_segrate - y_te) ** 2))
     preds = {}
 
     # (1) Project: per-segment CatBoost + isotonic
@@ -116,7 +125,9 @@ def run_seed(df, seed, raw_cols):
             m["auc"] = m["auc_lo"] = m["auc_hi"] = 0.5
         else:
             m = metrics_with_ci(y_te, p, base_rate, seed=seed)
-        m.update(model=name, seed=seed, n_test=int(len(te)), n_train=int(len(tr)),
+        m["brier_ref_segment_base_rate"] = brier_segrate
+        m["bss_vs_segment_base_rate"] = 1.0 - m["brier"] / brier_segrate
+        m.update(model=name, seed=seed, n_test=int(len(te)), n_train=int(len(tr)), thread_count=THREAD_COUNT,
                  test_churn_rate=float(y_te.mean()), train_base_rate=base_rate)
         # README-style statistic: unweighted mean of per-segment AUCs
         seg_aucs = {s: roc_auc_score(y_te[te.Segment.values == s], p[te.Segment.values == s])
@@ -190,13 +201,13 @@ def main():
     pd.DataFrame(paired).to_csv(os.path.join(OUT, "churn_perseg_vs_global_paired.csv"), index=False)
     pd.DataFrame(rel).to_csv(os.path.join(OUT, "churn_reliability_project_model.csv"), index=False)
 
-    cols = ["auc", "pr_auc", "brier", "bss", "ece", "mean_within_segment_auc"]
+    cols = ["auc", "pr_auc", "brier", "bss", "bss_vs_segment_base_rate", "ece", "mean_within_segment_auc"]
     summ = res.groupby("model")[cols].agg(["mean", "std"])
     summ.to_csv(os.path.join(OUT, "churn_summary_across_seeds.csv"))
     print(summ.round(4).to_string())
     print(pd.DataFrame(paired).round(4).to_string())
     with open(os.path.join(OUT, "churn_run_info.json"), "w") as fh:
-        json.dump({"seeds": SEEDS, "n_rows": int(len(df)), "features": FEATS, "raw_cols_reference": raw_cols,
+        json.dump({"seeds": SEEDS, "catboost_thread_count": THREAD_COUNT, "n_rows": int(len(df)), "features": FEATS, "raw_cols_reference": raw_cols,
                    "runtime_s": round(time.time() - t0, 1)}, fh, indent=2)
 
 
