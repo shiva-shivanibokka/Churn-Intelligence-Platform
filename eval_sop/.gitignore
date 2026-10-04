@@ -1,1 +1,4 @@
 data/
+# Resume checkpoint for agent_eval.py: same rows as results/agent_eval_rows.csv and
+# results/agent_eval_raw_outputs.jsonl, regrouped per (seed, customer). Kept locally, not tracked.
+results/agent_eval_checkpoint_*.jsonl

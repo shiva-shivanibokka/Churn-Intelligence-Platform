@@ -3,8 +3,9 @@
 Approaches (same 40 customers, stratified 10 per CustomerType, Cell2Cell):
   agent     -- the project's Python ReAct loop, src/agent_loop.py
                generate_retention_action_agentic(), unmodified, with its Groq
-               client swapped for a local Ollama model through the
-               OpenAI-compatible endpoint (free, local). Tools = src/agent_tools.py.
+               client swapped for a shim that calls a local Ollama model through
+               the native /api/chat endpoint (num_ctx=8192; the OpenAI-compatible
+               endpoint cannot set num_ctx). Tools = src/agent_tools.py.
   no_tools  -- same model, same system prompt's JSON contract, same user
                message, but no tools.
   rule      -- deterministic: intervene iff CustomerType == 'Persuadable' and
@@ -349,7 +350,8 @@ def main():
     print(f"infra errors excluded from scoring: {n_infra}")
     res_all = res
     res = res[~res["infra_error"]]
-    res_all.to_csv(os.path.join(OUT, "agent_eval_rows_including_infra_errors.csv"), index=False)
+    if n_infra:  # only differs from agent_eval_rows.csv when something was excluded
+        res_all.to_csv(os.path.join(OUT, "agent_eval_rows_including_infra_errors.csv"), index=False)
     res.to_csv(os.path.join(OUT, "agent_eval_rows.csv"), index=False)
     with open(os.path.join(OUT, "agent_eval_raw_outputs.jsonl"), "w", encoding="utf-8") as fh:
         for r in raw_log:
