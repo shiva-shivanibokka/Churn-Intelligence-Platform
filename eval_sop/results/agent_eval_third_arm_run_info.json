@@ -1,5 +1,6 @@
 {
   "model": "qwen2.5:7b",
+  "arm_label": "B",
   "arm": "full_prompt_no_tools",
   "system_prompt": "agent_loop.SYSTEM_PROMPT_BATCH verbatim, no tools attached",
   "user_message": "identical to agent_eval.no_tools",
@@ -15,5 +16,7 @@
   "sample": "10 per CustomerType from data/processed/uplift.parquet, pandas sample random_state=0",
   "runtime_s": 596.6,
   "n_infra_errors_excluded": 0,
-  "raw_response_truncation": "none -- full replies retained"
+  "max_est_prompt_tokens_over_runs": 667,
+  "raw_response_truncation": "none -- full replies retained",
+  "runtime_note": "596.6 s for the original LLM run. A later re-run of this arm replayed all 120 rows from the resume checkpoint without contacting the model (2.1 s), which confirmed the arm reproduces byte-identically but is not a timing of the work."
 }

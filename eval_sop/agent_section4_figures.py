@@ -99,9 +99,10 @@ def main():
     # Arm B (full prompt, tools removed) lives in its own file because it was run
     # separately -- adding it to agent_eval.py would have forced a re-run of the
     # expensive agent arm. Scored by the same agent_eval.score, so it concatenates.
-    third = os.path.join(OUT, "agent_eval_third_arm_rows.csv")
-    if os.path.exists(third):
-        d = pd.concat([d, pd.read_csv(third)], ignore_index=True)
+    for extra in ("agent_eval_third_arm_rows.csv", "agent_eval_third_arm_armD_rows.csv"):
+        p = os.path.join(OUT, extra)
+        if os.path.exists(p):
+            d = pd.concat([d, pd.read_csv(p)], ignore_index=True)
     d["one"] = 1.0
     d["valid_json"] = d["valid_json"].astype(bool)
     d["intervene"] = d["intervene"].astype(bool).astype(float)
@@ -119,7 +120,8 @@ def main():
     d = pd.concat([d, nv], ignore_index=True)
 
     out: list[dict] = []
-    arms = ["agent", "full_prompt_no_tools", "no_tools_llm", "rule_based", "never_intervene"]
+    arms = ["agent", "tool_output_no_calls", "full_prompt_no_tools", "no_tools_llm",
+            "rule_based", "never_intervene"]
     for ap in [a for a in arms if (d.approach == a).any()]:
         g = d[d.approach == ap]
         sd = g[g.customer_type == "Sleeping Dog"]
@@ -153,34 +155,41 @@ def main():
     res = pd.DataFrame(out)
     res.to_csv(os.path.join(OUT, "agent_section4_figures.csv"), index=False)
 
-    # ── Three-arm decomposition of the Sleeping-Dog contact rate ──────────────
-    # A vs B isolates the tools (prompt held fixed); B vs C isolates the prompt
-    # (no tools in either). Paired on customer: the same 10 Sleeping Dogs appear
-    # in every arm, so the difference is bootstrapped over customers, not runs.
+    # ── Decomposition of the Sleeping-Dog contact rate ────────────────────────
+    # Four arms, each pair holding all but one factor fixed. Paired on customer:
+    # the same 10 Sleeping Dogs appear in every arm, so the difference is
+    # bootstrapped over customers, not runs, using one shared set of draws.
     contrasts = []
     if (d.approach == "full_prompt_no_tools").any():
-        sd_all = d[d.customer_type == "Sleeping Dog"]
-        per_cust = (sd_all.groupby(["approach", "customer_id"])["intervene"].mean().unstack(0))
-        pairs = [("agent", "full_prompt_no_tools", "tools (prompt held fixed)"),
-                 ("full_prompt_no_tools", "no_tools_llm", "prompt (no tools in either)"),
+        pairs = [("agent", "full_prompt_no_tools", "the whole tool loop (prompt held fixed)"),
+                 ("tool_output_no_calls", "full_prompt_no_tools", "having tool OUTPUT in context (no calling)"),
+                 ("agent", "tool_output_no_calls", "function-CALLING itself (same information in both)"),
+                 ("full_prompt_no_tools", "no_tools_llm", "the prompt (no tools in either)"),
                  ("agent", "no_tools_llm", "tools + prompt together (original confounded contrast)")]
-        rng = np.random.default_rng(BOOT_SEED)
-        cust_ids = per_cust.index.values
-        draws = [rng.integers(0, len(cust_ids), len(cust_ids)) for _ in range(N_BOOT)]
-        for hi, lo, what in pairs:
-            if hi not in per_cust or lo not in per_cust:
-                continue
-            diff = (per_cust[hi] - per_cust[lo]).values
-            point = float(diff.mean())
-            b = [float(diff[idx].mean()) for idx in draws]
-            ci_lo, ci_hi = np.percentile(b, [2.5, 97.5])
-            contrasts.append({"isolates": what, "higher_arm": hi, "lower_arm": lo,
-                              "rate_higher": float(per_cust[hi].mean()), "rate_lower": float(per_cust[lo].mean()),
-                              "difference": point, "ci_lo": float(ci_lo), "ci_hi": float(ci_hi),
-                              "n_customers": int(len(cust_ids)),
-                              "excludes_zero": bool(ci_lo > 0 or ci_hi < 0)})
+        # Two outcome definitions, because they do not agree and reporting only one
+        # would overstate the case: "Sleeping Dog" is the headline metric, and
+        # "Lost Cause or Sleeping Dog" is the broader do-not-contact population.
+        outcomes = {"sleeping_dog": ["Sleeping Dog"],
+                    "lost_cause_or_sleeping_dog": ["Lost Cause", "Sleeping Dog"]}
+        for oname, types in outcomes.items():
+            sub = d[d.customer_type.isin(types)]
+            per_cust = sub.groupby(["approach", "customer_id"])["intervene"].mean().unstack(0)
+            rng = np.random.default_rng(BOOT_SEED)
+            cust_ids = per_cust.index.values
+            draws = [rng.integers(0, len(cust_ids), len(cust_ids)) for _ in range(N_BOOT)]
+            for hi, lo, what in pairs:
+                if hi not in per_cust or lo not in per_cust:
+                    continue
+                diff = (per_cust[hi] - per_cust[lo]).values
+                b = [float(diff[idx].mean()) for idx in draws]
+                ci_lo, ci_hi = np.percentile(b, [2.5, 97.5])
+                contrasts.append({"outcome": oname, "isolates": what, "higher_arm": hi, "lower_arm": lo,
+                                  "rate_higher": float(per_cust[hi].mean()), "rate_lower": float(per_cust[lo].mean()),
+                                  "difference": float(diff.mean()), "ci_lo": float(ci_lo), "ci_hi": float(ci_hi),
+                                  "n_customers": int(len(cust_ids)),
+                                  "excludes_zero": bool(ci_lo > 0 or ci_hi < 0)})
         pd.DataFrame(contrasts).to_csv(os.path.join(OUT, "agent_sleeping_dog_decomposition.csv"), index=False)
-        print("\n-- Sleeping-Dog decomposition (paired on customer, clustered bootstrap) --")
+        print("\n-- Do-not-contact decomposition (paired on customer, clustered bootstrap) --")
         print(pd.DataFrame(contrasts).round(4).to_string(index=False))
 
     # Where do the agent's unparseable replies sit?

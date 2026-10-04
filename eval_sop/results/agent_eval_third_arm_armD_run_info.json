@@ -1,0 +1,23 @@
+{
+  "model": "qwen2.5:7b",
+  "arm_label": "D",
+  "arm": "tool_output_no_calls",
+  "system_prompt": "agent_loop.SYSTEM_PROMPT_BATCH verbatim, no tools attached",
+  "user_message": "agent_eval.no_tools message PLUS the recomputed 5-step tool results (src/agent_loop.py:36-41 order), leak keys stripped",
+  "parser": "agent_eval.parse_json (lenient) -- same as the no_tools_llm arm",
+  "endpoint": "ollama local native /api/chat, num_ctx=8192, sequential",
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "temperature": 0.7,
+  "n_customers": 40,
+  "sample": "10 per CustomerType from data/processed/uplift.parquet, pandas sample random_state=0",
+  "runtime_s": 725.1,
+  "n_infra_errors_excluded": 0,
+  "max_est_prompt_tokens_over_runs": 1941,
+  "raw_response_truncation": "none -- full replies retained",
+  "tool_output_provenance": "Recomputed, not replayed: the run stored (tool, args) but not results. Every tool in src/agent_tools.py is a deterministic pure function of (df, playbook, args), so this reproduces them exactly. Playbook queried for the customer's TRUE top signed SHAP driver; ROI at the pipeline's flat $15 intervention cost.",
+  "caveat": "Arm D's context is correct by construction, whereas the live agent queried the playbook for the true top driver in only 71% of runs. Arm D is therefore a mildly FAVOURABLE reconstruction of arm A's context, not a replay of it."
+}
