@@ -8,6 +8,12 @@ mlruns/
 
 # data/processed/ and models/ are intentionally tracked so Streamlit Cloud
 # can serve the pre-built models without re-running the pipeline.
+#
+# That is why data/raw/ being ignored is not on its own enough: the processed
+# parquets used to carry the source dataset's own feature values, and 52 of them
+# were read by nothing. src/published_columns.py strips them on write and
+# tests/test_published_columns.py fails if a fat artifact is ever committed
+# again. Adding a parquet here does not relax that.
 data/raw/
 catboost_info/
 *.zip

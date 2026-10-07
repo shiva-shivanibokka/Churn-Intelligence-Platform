@@ -41,6 +41,8 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 
+from published_columns import restrict_for_publication
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -337,9 +339,14 @@ def run_uplift_pipeline(
     feature_cols: list,
     avg_clv: float = 500.0,
     intervention_cost: float = 15.0,
+    dataset: str | None = None,
 ) -> dict:
     """
     Full uplift modeling pipeline.
+
+    ``dataset`` names the source dataset so the parquet this writes can be
+    stripped of source columns before it is committed (see
+    ``src/published_columns.py``). None strips nothing.
     """
     logger.info("Simulating treatment assignment from observational data...")
     df = df.copy()
@@ -405,7 +412,9 @@ def run_uplift_pipeline(
     logger.info("Uplift metrics: %s", metrics)
 
     # Save
-    df.to_parquet(os.path.join(PROCESSED_PATH, "uplift.parquet"), index=False)
+    restrict_for_publication(df, dataset).to_parquet(
+        os.path.join(PROCESSED_PATH, "uplift.parquet"), index=False
+    )
     joblib.dump(metrics, os.path.join(MODELS_PATH, "uplift_metrics.pkl"))
     # Needed by api/serve.py. Without these the scoring endpoint had no way to
     # estimate uplift for an unseen customer, so it passed a hardcoded 0.0 into
@@ -433,7 +442,7 @@ if __name__ == "__main__":
 
     feature_sets = get_feature_sets()
 
-    results = run_uplift_pipeline(df, feature_sets["uplift_model"])
+    results = run_uplift_pipeline(df, feature_sets["uplift_model"], dataset="ecommerce")
     df_out = results["df"]
 
     print("\nCustomer Type Distribution:")

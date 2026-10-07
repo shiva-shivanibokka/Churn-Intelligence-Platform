@@ -32,6 +32,8 @@ from sklearn.metrics import (
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 
+from published_columns import restrict_for_publication
+
 warnings.filterwarnings("ignore")
 
 logger = logging.getLogger(__name__)
@@ -318,9 +320,21 @@ def build_segment_profiles(df: pd.DataFrame, feature_cols: list) -> pd.DataFrame
     return profile
 
 
-def run_segmentation(df: pd.DataFrame, feature_cols: list, n_clusters: int = 5) -> dict:
+def run_segmentation(
+    df: pd.DataFrame,
+    feature_cols: list,
+    n_clusters: int = 5,
+    dataset: str | None = None,
+) -> dict:
     """
     Full segmentation pipeline. Returns all artifacts needed for the Streamlit UI.
+
+    ``dataset`` names the source dataset so the parquet this writes can be
+    stripped of source columns before it is committed — see
+    ``src/published_columns.py``. Left as None nothing is stripped, so a caller
+    that has not been updated keeps today's behaviour rather than silently
+    dropping columns it needed; ``tests/test_published_columns.py`` is the
+    backstop that catches a fat artifact before it reaches git.
     """
     logger.info("Scaling %d features for %d customers...", len(feature_cols), len(df))
     X_scaled, scaler = scale_features(df[feature_cols])
@@ -367,7 +381,7 @@ def run_segmentation(df: pd.DataFrame, feature_cols: list, n_clusters: int = 5) 
     joblib.dump(label_map, os.path.join(MODELS_PATH, "label_map.pkl"))
 
     out_path = os.path.join(PROCESSED_PATH, "segmented.parquet")
-    df_out.to_parquet(out_path, index=False)
+    restrict_for_publication(df_out, dataset).to_parquet(out_path, index=False)
 
     logger.info("Done. Saved segmented data to %s", out_path)
 
@@ -390,7 +404,7 @@ if __name__ == "__main__":
 
     df = build_pipeline(save=True)
     feature_sets = get_feature_sets()
-    results = run_segmentation(df, feature_sets["clustering"])
+    results = run_segmentation(df, feature_sets["clustering"], dataset="ecommerce")
 
     print("\nSegment Profiles:")
     print(results["profiles"])

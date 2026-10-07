@@ -30,6 +30,7 @@ from composite_features import (
 from features import build_pipeline, get_feature_sets
 from logging_config import configure_logging
 from olist_features import build_olist_pipeline, get_olist_feature_sets
+from published_columns import restrict_for_publication
 from segmentation import run_segmentation
 from uplift_model import run_uplift_pipeline
 
@@ -180,7 +181,9 @@ def run_full_pipeline(force_retrain: bool = False, dataset: str = "ecommerce") -
         seg_profiles["ChurnRate"] = df.groupby("Segment")["Churn"].mean().round(3)
     else:
         logger.info("[Stage 2] Customer Segmentation")
-        seg_results = run_segmentation(df, feature_sets["clustering"], n_clusters=5)
+        seg_results = run_segmentation(
+            df, feature_sets["clustering"], n_clusters=5, dataset=dataset
+        )
         df = seg_results["df"]
         stability = seg_results["stability"]
         seg_profiles = seg_results["profiles"]
@@ -189,17 +192,17 @@ def run_full_pipeline(force_retrain: bool = False, dataset: str = "ecommerce") -
 
     # Stage 3: Per-Segment Churn Models
     logger.info("[Stage 3] Per-Segment Churn Prediction")
-    churn_results = run_churn_pipeline(df, feature_sets["churn_model"])
+    churn_results = run_churn_pipeline(df, feature_sets["churn_model"], dataset=dataset)
     df = churn_results["df"]
     segment_models = churn_results["segment_models"]
 
     # Stage 4: Uplift Modeling
     logger.info("[Stage 4] Uplift Modeling (Causal ML)")
-    uplift_results = run_uplift_pipeline(df, feature_sets["uplift_model"])
+    uplift_results = run_uplift_pipeline(df, feature_sets["uplift_model"], dataset=dataset)
     df = uplift_results["df"]
 
     # Save final enriched dataset
-    df.to_parquet(uplift_path, index=False)
+    restrict_for_publication(df, dataset).to_parquet(uplift_path, index=False)
     with open(META_PATH, "w", encoding="utf-8") as fh:
         json.dump({"dataset": dataset, "n_rows": int(len(df))}, fh, indent=2)
     logger.info("Pipeline complete. Final dataset: %s", df.shape)

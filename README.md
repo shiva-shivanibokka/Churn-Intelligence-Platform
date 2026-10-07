@@ -825,9 +825,39 @@ for, and it is not evidence of an effect size.
 
 ---
 
+## Data provenance
+
+**Cell2Cell** — the dataset the committed artifacts are trained on — was compiled
+by the **Teradata Center for CRM at Duke University** (Neslin et al., 2006). The
+copy in general circulation is a
+[Kaggle mirror](https://www.kaggle.com/datasets/jpacse/datasets-for-churn-telecom)
+whose licence field reads **"Unknown"**. This repository therefore **does not
+redistribute it**: `data/raw/` is gitignored, and `src/cell2cell_features.py`
+expects you to download it yourself.
+
+That claim used to be only half true. The processed parquets under
+`data/processed/` are tracked on purpose, so the dashboard runs from a clone
+without re-running the pipeline — and they carried the source dataset's own
+feature values with them. 55 of `uplift.parquet`'s 103 columns were verbatim
+Cell2Cell columns, and nothing in this repository read 52 of them. They are now
+stripped on write, enforced by `src/published_columns.py` and
+`tests/test_published_columns.py`.
+
+Four source signals do remain, and it is more useful to name them than to claim
+a clean break: `CustomerID`, `Churn` (the label — without it the committed
+artifacts cannot be checked against the reported metrics), `MaritalStatus`, and
+`MonthsInService`, which appears as both `Tenure` and `OrderCount`.
+
+Other datasets: **Olist** ([Kaggle](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce),
+CC BY-NC-SA 4.0) is aggregated across nine tables into per-customer summaries.
+The **e-commerce** workbook is a Kaggle dataset whose source columns *are* the
+model's feature names, so the same strip cannot be applied to it without
+breaking the pipeline — see the note in `src/published_columns.py`.
+
 ## License
 
-This repository is currently unlicensed. All rights reserved by the author.
+[MIT](LICENSE) — covers the code in this repository. It says nothing about the
+datasets above, which carry their own terms.
 
 ---
 

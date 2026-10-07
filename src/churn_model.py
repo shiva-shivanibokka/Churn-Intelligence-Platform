@@ -65,6 +65,8 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import StratifiedKFold, train_test_split
 
+from published_columns import restrict_for_publication
+
 warnings.filterwarnings("ignore")
 
 logger = logging.getLogger(__name__)
@@ -455,9 +457,14 @@ def run_churn_pipeline(
     df: pd.DataFrame,
     feature_cols: list,
     experiment_name: str = "CustomerChurnEngine",
+    dataset: str | None = None,
 ) -> dict:
     """
     Full per-segment churn modeling pipeline with MLflow tracking.
+
+    ``dataset`` names the source dataset so the parquet this writes can be
+    stripped of source columns before it is committed (see
+    ``src/published_columns.py``). None strips nothing.
     """
     os.makedirs(MODELS_PATH, exist_ok=True)
 
@@ -519,7 +526,9 @@ def run_churn_pipeline(
 
     # Save artifacts
     joblib.dump(segment_models, os.path.join(MODELS_PATH, "segment_models.pkl"))
-    df_scored.to_parquet(os.path.join(PROCESSED_PATH, "scored.parquet"), index=False)
+    restrict_for_publication(df_scored, dataset).to_parquet(
+        os.path.join(PROCESSED_PATH, "scored.parquet"), index=False
+    )
     logger.info("Saved scored data. High-risk customers: %d", (df_scored["RiskTier"] == "High Risk").sum())
 
     return {
@@ -539,10 +548,10 @@ if __name__ == "__main__":
     df = build_pipeline(save=True)
     feature_sets = get_feature_sets()
 
-    seg_results = run_segmentation(df, feature_sets["clustering"])
+    seg_results = run_segmentation(df, feature_sets["clustering"], dataset="ecommerce")
     df_seg = seg_results["df"]
 
-    churn_results = run_churn_pipeline(df_seg, feature_sets["churn_model"])
+    churn_results = run_churn_pipeline(df_seg, feature_sets["churn_model"], dataset="ecommerce")
     df_final = churn_results["df"]
 
     print("\nRisk Distribution:")

@@ -635,3 +635,97 @@ intent. `src/` is still unmodified. This replaces "reproduced by inspection" wit
   truncation costs more in lost evidence than it saves in artifact size.
 - Cleanup: the evaluation venv lives at `%TEMP%\sopvenv` (outside the repo, because of the Windows MAX_PATH limit under the
   scratchpad). It can be deleted after review.
+
+## 10. The tracked parquets were redistributing the source dataset
+
+`.gitignore` records a deliberate decision: `data/processed/` and `models/` are
+tracked so the deployed dashboard runs from a clone without re-running the
+pipeline. That decision stands. What was never decided is **which columns** came
+along with it.
+
+Every parquet write handed `to_parquet` whatever frame the stage happened to be
+holding, so each tracked file carried the Cell2Cell source columns. Measured on
+the committed artifacts:
+
+| Tracked file | Columns | Verbatim source columns | Read by anything |
+| --- | --- | --- | --- |
+| `data/processed/features.parquet` | 81 | 52 | 0 of the 52 |
+| `data/processed/scored.parquet` | 94 | 52 | 0 of the 52 |
+| `data/processed/segmented.parquet` | 90 | 52 | 0 of the 52 |
+| `data/processed/uplift.parquet` | 103 | 55 | 3 of the 55 |
+
+Cell2Cell was compiled by the Teradata Center for CRM at Duke University (Neslin
+et al., 2006); the circulating copy is a Kaggle mirror whose licence field reads
+"Unknown". The raw CSV was correctly gitignored, so the README's "we do not ship
+the data" was true of `data/raw/` and false of `data/processed/`.
+
+**How "read by anything" was established**, since the whole fix rests on it: a
+scan of every tracked `.py`, `.ts`, `.tsx`, `.sql`, `.json` and `.yml` file for
+each column name as a string literal — deliberately over-inclusive, because a
+column wrongly kept costs bytes and a column wrongly dropped breaks the app. Of
+the 55 source columns in `uplift.parquet`, exactly three are named by any
+consumer: `CustomerID`, `Churn` and `MaritalStatus`. The only other hit anywhere
+was `eval_sop/results/churn_run_info.json`, which records the column *names* a
+past run saw — provenance, not a consumer.
+
+**Fix.** `src/published_columns.py` declares the source schema and the short list
+of source columns that may be published; all seven `to_parquet` sites project
+through `restrict_for_publication`. The four committed parquets were re-written
+through the same projection: **52 columns dropped from each**, 51,047 rows
+preserved, and the surviving columns asserted byte-identical to what they held
+before (`pd.testing.assert_frame_equal`). `uplift.parquet` goes 103 → 51 columns,
+9.45 MB → 7.55 MB.
+
+**Why this does not break anything, checked rather than assumed.**
+`src/cell2cell_features.py` maps the raw telecom columns onto the e-commerce
+schema's names before anything is modelled — `MonthsInService` becomes `Tenure`,
+and so on — so on the Cell2Cell path the models train entirely on renamed and
+derived columns. All 23 churn features, all 13 clustering features and all 9
+uplift features survive; `scripts/readme_metrics.py --check` still passes against
+the trimmed artifacts; `migrate_to_supabase.load_data()` still yields all 25
+dashboard fields; `eval_sop/churn_eval.py` can still build its feature matrix
+from the trimmed `segmented.parquet`.
+
+**The e-commerce path is deliberately left unprotected.** There the source column
+names *are* the feature names: enforcing the same rule would drop 17 of the 26
+churn features, 5 of 13 clustering features and 3 of 9 uplift features. That
+dataset's exposure is a real and separate problem, and stripping columns the
+models need is not its solution. `ECOMMERCE_SOURCE_COLUMNS` is declared but kept
+out of `SOURCE_COLUMNS`, and a test pins that it stays out so the gap is a
+documented choice rather than an oversight.
+
+**Four source signals still ship, and naming them is the point.** `Churn` is the
+label, and without it the committed artifacts cannot be checked against the
+reported AUC/Brier/churn-rate figures at all — which would defeat the reason the
+parquets are tracked. `CustomerID` is the join key. `MaritalStatus` is read by
+`app.py`. And `MonthsInService` survives under two derived names. So the
+reduction is large, not total: four signals instead of 55.
+
+**Tests.** `tests/test_published_columns.py`, 15 tests. Four of them fail against
+the parquets as they were committed — that is what made this a defect rather than
+an opinion. The suite goes **82 → 95 passed** (plus the 2 schema-drift tests, which skip in a clone that has no raw data), `ruff check .` clean.
+
+Two assertions guard the opposite failure, over-trimming: one pins the columns
+`scripts/readme_metrics.py` needs, and one pins all 25 fields in
+`migrate_to_supabase.py`'s column map. That map is intersected with whatever is
+present (`present = {k: v for k, v in col_map.items() if k in uplift.columns}`),
+so a dropped column would not raise — it would silently become a missing
+dashboard field.
+
+Two more guard the declaration itself: the hardcoded schemas exist because a
+clone has no raw data, and when the raw files *are* present the tests re-read
+their real headers and assert agreement. Both verified against the real files —
+58 columns for Cell2Cell, 20 for the e-commerce workbook — rather than left to
+skip.
+
+### Found while doing this, not fixed: `Tenure` and `OrderCount` are the same column
+
+On the Cell2Cell path `df["Tenure"].equals(df["OrderCount"])` is `True` — both are
+copies of the source column `MonthsInService` — and **both appear in the
+`churn_model` feature list**. So each per-segment model is fed the same 56-valued
+column twice under two names.
+
+Not fixed here because removing one changes every per-segment model and therefore
+every AUC, Brier and churn-rate figure the README reports, which is a separate
+piece of work with its own re-measurement. Recorded rather than quietly dropped,
+and it belongs with §9's other proposed changes.
