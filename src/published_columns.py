@@ -56,8 +56,12 @@ heavily lossy are not counted as recoverable: ``Complain`` keeps 54.89% of
 43.95% of ``PercChangeRevenues`` (negatives are clipped away), and ``CityTier``
 12.20% of ``IncomeGroup``.
 
-Removing the aliases is not an option — they are the models' actual features.
-The reduction available without breaking the models is the one taken here.
+Removing most of these aliases is not an option — they are the models' actual
+features. `OrderCount` is the exception: it is no longer any model's feature (it
+duplicated `Tenure`, see RESULTS.md section 11b) and is published only because
+the Supabase `customers` table and the dashboard have an order-count field. The
+reduction available without breaking the models or the dashboard is the one
+taken here.
 
 Olist is not listed below. ``src/olist_features.py`` builds its frame by
 aggregating nine normalised tables into per-customer summaries, so its output
@@ -113,9 +117,10 @@ ECOMMERCE_SOURCE_COLUMNS: frozenset[str] = frozenset({
 # `src/cell2cell_features.py` maps the raw telecom columns onto the e-commerce
 # schema's names (`MonthsInService` becomes `Tenure`, and so on) before anything
 # is modelled, so on that path the models train entirely on renamed and derived
-# columns and the raw names are inert passengers. All 23 churn features, all 13
+# columns and the raw names are inert passengers. All 22 churn features, all 13
 # clustering features and all 9 uplift features survive the trim — checked, not
-# assumed.
+# assumed. (23 churn features when that check was first run; one of them was a
+# duplicate of another and was removed — see RESULTS.md section 11b.)
 #
 # On the e-commerce path the opposite is true: the source column names ARE the
 # feature names. Enforcing the same rule there would drop 17 of the 26 churn

@@ -17,7 +17,7 @@
 
 - **What it does:** Segments customers behaviorally, predicts churn per cohort with calibrated probabilities, identifies the subset worth spending retention budget on (uplift modeling), and deploys a 12-tool ReAct AI agent that reasons over SHAP drivers, intervention history, and ROI before generating and saving a personalized retention plan.
 - **Hardest problem solved:** Replacing a naive "email everyone above 0.7 churn probability" approach with causal uplift modeling (CausalML T-Learner + S-Learner) to distinguish Persuadables from Lost Causes and Sleeping Dogs — the same targeting logic Uber open-sourced CausalML to solve.
-- **Verified results:** holdout AUC 0.557–0.689 across 5 segments; isotonic calibration cutting held-out Brier from 0.2343 to 0.1947; cluster stability mean ARI 0.915 over 100 seeded bootstrap resamplings; 7,788 Persuadables on the Cell2Cell dataset. The [Results](#results) section itself is written by `scripts/readme_metrics.py` and re-checked in CI; **this bullet is hand-typed**, which is why it once carried figures from an earlier run than the table below it. One segment's 0.557 comes from a single-tree model — read it as "no usable signal in that segment", and see `RESULTS.md` §11d.
+- **Verified results:** holdout AUC 0.557–0.689 across 5 segments; isotonic calibration cutting held-out Brier from 0.2343 to 0.1947; cluster stability mean ARI 0.915 over 100 seeded bootstrap resamplings; 7,788 Persuadables on the Cell2Cell dataset. The [Results](#results) section itself is written by `scripts/readme_metrics.py` and re-checked in CI; **this bullet is hand-typed**, which is why it once carried figures from an earlier run than the table below it. One segment's 0.557 comes from a single depth-6 tree — weak but above chance in all five eval seeds, and reported as such rather than silently alongside the multi-hundred-tree models; see `RESULTS.md` §11d.
 - **The bug worth reading about:** the uplift score's sign was inverted, so for months the "Persuadables" this system recommended contacting were precisely the customers its own model predicted contact would drive away. It produced a ranked list, plausible ROI and a working dashboard the entire time. [What happened, and the check that now runs every pipeline](#results).
 
 ---
@@ -92,7 +92,7 @@ flowchart TD
 
 **Why it's shaped this way:**
 
-- **Per-segment models over a global model.** A Champion and a Lapsed customer churn for fundamentally different reasons. Separate CatBoost classifiers per cohort capture segment-specific dynamics. This mirrors Salesforce Einstein's per-tier health scoring. *Measured, it did not pay off on Cell2Cell:* a single global CatBoost trained the same way on the same rows scored 0.006–0.012 higher pooled holdout AUC in all five seeds tested, with paired 95% CIs excluding zero (`eval_sop/` and `RESULTS.md` on the `sop-eval` branch).
+- **Per-segment models over a global model.** A Champion and a Lapsed customer churn for fundamentally different reasons. Separate CatBoost classifiers per cohort capture segment-specific dynamics. This mirrors Salesforce Einstein's per-tier health scoring. *Measured, it did not pay off on Cell2Cell:* a single global CatBoost trained the same way on the same rows scored 0.0071–0.0165 higher pooled holdout AUC in all five seeds tested, with paired 95% CIs excluding zero (`eval_sop/` and `RESULTS.md` on the `sop-eval` branch).
 - **Isotonic calibration over raw probabilities.** These models are trained with `class_weights=[1, pos_weight]` to handle imbalance, which inflates the positive class *by construction* — so a raw score of 0.7 is not a 70% chance of churn. That matters because the score is then multiplied by CLV to rank retention spend, which is exactly the case where an uncalibrated probability costs money. Isotonic is fitted on a held-out slice and preferred over Platt scaling for non-parametric distributions.
 
   The claim used to be false. `calibrated_clf` was a plain alias for the base model, on the reasoning that CatBoost is well calibrated natively — which ignores the class weighting, and which nothing checked because every call site read `model_dict["calibrated_clf"]` and so looked calibrated either way. `holdout_brier_uncalibrated` and `holdout_brier` are now both recorded, so it is a measurement.
@@ -409,7 +409,8 @@ CRON_SECRET=any-long-random-string
 [Stage 1] Feature Engineering — 51,047 customers, 8 composite features
 [Stage 2] Segmentation — k=5, stability mean ARI=0.915 (Highly Stable)
 [Stage 3] Churn Prediction — per-segment CatBoost, holdout AUC 0.557–0.689
-          WARNING  Segment Lapsed produced a 1-tree model: ... 'no usable signal found'
+          WARNING  Segment Lapsed produced a 1-tree model: early stopping found no
+                   improvement past the first iteration ...
 [Stage 4] Uplift Modeling — 7,788 Persuadables, 19,112 Lost Causes
           Uplift direction check passed — treated top decile churns 0.255 vs bottom 0.425
 

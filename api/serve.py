@@ -263,8 +263,13 @@ def score(customer: CustomerFeatures) -> ScoreResponse:
     clustering_features = list(fitted_names) if fitted_names is not None else [
         "EngagementScore", "RecencySignal", "StickinessIndex", "SpendTrend",
         "SupportRiskScore", "DiscountSensitivity", "TenureStability", "WarehouseFriction",
-        "CityTier", "HourSpendOnApp", "OrderCount", "NumberOfDeviceRegistered",
+        "CityTier", "HourSpendOnApp", "Tenure", "NumberOfDeviceRegistered",
         "SatisfactionScore",
+        # `Tenure` replaced `OrderCount` here: on the Cell2Cell path the two held
+        # identical values and the clustering list now asks for the one whose name
+        # is true (RESULTS.md section 11b). This branch is only reached when the
+        # scaler carries no feature_names_in_; the live path reads them off the
+        # scaler, which says Tenure.
     ]
     missing = [f for f in clustering_features if f not in df.columns]
     if missing:

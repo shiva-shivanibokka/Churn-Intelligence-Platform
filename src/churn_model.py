@@ -248,9 +248,10 @@ def train_segment_model(
     tree_count = int(getattr(base_clf, "tree_count_", None) or best_iteration + 1)
     if tree_count <= 1:
         logger.warning(
-            "Segment %s produced a %d-tree model: early stopping fired on the "
-            "first iteration, so this segment's model is a stump and its holdout "
-            "AUC should be read as 'no usable signal found', not as a score.",
+            "Segment %s produced a %d-tree model: early stopping found no "
+            "improvement past the first iteration. Its holdout AUC is still a real "
+            "number, but it comes from a single tree and should be reported as such "
+            "rather than alongside multi-hundred-tree models without comment.",
             segment_name, tree_count,
         )
 
@@ -352,9 +353,9 @@ def train_segment_model(
 
     logger.info(
         "Segment '%s': CV AUC=%.3f | Holdout AUC=%.3f | Holdout Brier %.4f→%.4f "
-        "(calibrated) | best_iter=%d | n_fit=%d, n_cal=%d, n_test=%d, churn_rate=%.2f%%",
+        "(calibrated) | trees=%d (best_iter=%d) | n_fit=%d, n_cal=%d, n_test=%d, churn_rate=%.2f%%",
         segment_name, cv_auc, holdout_auc, holdout_brier_uncalibrated, holdout_brier,
-        best_iteration, len(y_fit), len(y_cal), len(y_test), y.mean() * 100,
+        tree_count, best_iteration, len(y_fit), len(y_cal), len(y_test), y.mean() * 100,
     )
 
     return {

@@ -4,6 +4,8 @@ Branch `sop-eval`, based on `main` at `8e68bc6`.
 - **Unchanged:** `src/` and `dashboard/`. No existing test was modified.
 - **tests/:** one new file, `tests/test_known_defects.py` — 9 reproduction tests pinning the three section-9 defects so
   they cannot regress, or be fixed, silently. Suite goes 73 → 82 passed.
+  **Later on this branch:** two more test files for §10 and three more for §11,
+  bringing the suite to **119 tests**. The 82 above is the count as of §9.
 - **README.md:** two claims qualified (change log #6). The generated part of that change comes from `scripts/readme_metrics.py`.
 - **New:** all evaluation code and outputs are in `eval_sop/`.
 - **Agent evaluation (section 4):** four arms on a local 7B model with an 8k context and scored programmatically. No paid API
@@ -15,7 +17,7 @@ Branch `sop-eval`, based on `main` at `8e68bc6`.
 |---|---|
 | Churn data | Cell2Cell (`cell2celltrain.csv`, 51,047 labelled rows, 28.8% churn). I used the committed pipeline artifact `data/processed/segmented.parquet` (the exact input to Stage 3) so the segments match the shipped models. |
 | Uplift data | Hillstrom MineThatData e-mail challenge, 64,000 rows, randomized (2/3 got an e-mail). Source: `http://www.minethatdata.com/Kevin_Hillstrom_MineThatData_E-MailAnalytics_DataMiningChallenge_2008.03.20.csv`, sha256 `0e5893…aece`, checked in code. Raw data is not committed (`eval_sop/.gitignore`). |
-| Python env | Python 3.12.3. Pinned in `eval_sop/requirements-eval.txt`: numpy 2.4.6, pandas 2.3.3, scikit-learn 1.8.0, catboost 1.2.10, xgboost 3.2.0, causalml 0.16.0, numba 0.65.1. |
+| Python env | Python 3.12.3, two environments, and the split matters. **§2–§4** come from `eval_sop/requirements-eval.txt`: numpy 2.4.6, scikit-learn 1.8.0, catboost 1.2.10, xgboost 3.2.0, causalml 0.16.0, numba 0.65.1. **§1 and §11** were re-measured in `eval_sop/requirements-rerun.txt`: numpy **2.0.2** (which satisfies `requirements.txt`'s `numpy<2.1` — the first run of this project at its own pin), scikit-learn **1.9.1**, same catboost/xgboost/causalml, numba 0.68.0. The committed models unpickle with an `InconsistentVersionWarning` under 1.8.0, which is how the two can be told apart. `churn_run_info.json` records no versions, so it does not settle it. |
 | Seeds | Churn: split and model seeds {42, 7, 13, 21, 99}. Hillstrom: split seeds {42, 7, 13, 21, 99}. The project's XGBoost learners keep their hard-coded `random_state=42`. |
 | CIs | 95% percentile bootstrap over held-out rows: 1,000 resamples (churn) and **5,000 (uplift — raised from 500 in round-2 #12, because a conclusion rested on a bound of 2e-5 that was inside the Monte-Carlo error of 500)**. Agent CIs bootstrap over the 40 customers, clustered on customer. The CIs capture test-set noise only, and **none is corrected for multiple comparisons**. The ± values are std across seeds, which are overlapping splits of the same rows, so they are **not** standard errors (§5). |
 | Threads | All runs used `OMP_NUM_THREADS=2 MKL_NUM_THREADS=2`. `churn_eval.py` pins CatBoost `thread_count=2`; CatBoost output depends on it (see #5 below). |
@@ -34,12 +36,13 @@ OMP_NUM_THREADS=2 python eval_sop/agent_parser_check.py --no-tools --model qwen2
 OMP_NUM_THREADS=2 python eval_sop/agent_third_arm.py --arm B --model qwen2.5:7b --seeds 0 1 2   # ~10 min, local Ollama (arm B)
 OMP_NUM_THREADS=2 python eval_sop/agent_third_arm.py --arm D --model qwen2.5:7b --seeds 0 1 2   # ~12 min, local Ollama (arm D)
 OMP_NUM_THREADS=2 python eval_sop/agent_section4_figures.py   # <1 min, offline; every section-4 figure + CI + decomposition
-python -m pytest -q                                           # 82 passed (73 existing + 9 defect-reproduction)
+python -m pytest -q                                           # 119 passed (82 as of §9, then §10 and §11)
 ```
 
 **The README figures reproduce exactly.** With the project's own `churn_model.train_segment_model` and seed 42, every
 per-segment holdout AUC and Brier pair matches the README table to the printed precision
-(`eval_sop/results/churn_reproduction_seed42.csv`). Examples: At-Risk AUC 0.6923, Brier 0.2197→0.1778; Lapsed 0.5755,
+(`eval_sop/results/churn_reproduction_seed42.csv`). Examples, re-measured after §11:
+At-Risk AUC 0.6891, Brier 0.2202→0.1779; Lapsed 0.5569,
 0.2453→0.2197. This path keeps the project's `thread_count=-1`, exactly as the README numbers were produced.
 
 ## 1. Churn model (Cell2Cell, pooled held-out set: n = 10,211 per seed)
@@ -91,7 +94,7 @@ What it does not support:
 - **"Per-segment beats global."** On this data a single global model is slightly but consistently better.
 - **The 17% Brier reduction as a measure of skill.** The README reports it correctly as calibrated vs uncalibrated
   (`scripts/readme_metrics.py`). It measures calibration, not predictive skill. Against a constant base-rate forecast
-  (Brier 0.2051) the skill is **4.1% ± 0.5**. Against per-segment base rates it is 3.7% ± 0.5.
+  (Brier 0.2051) the skill is **4.0% ± 0.5**. Against per-segment base rates it is 3.5% ± 0.5.
 - Strong prediction. AUC is about 0.63. The project's feature mapping also gives up some signal: the raw columns reach about 0.67.
 
 Reliability (seed 42, `churn_reliability_project_model.csv`) is good between 0.1 and 0.5, where 95% of rows sit. Above
@@ -513,7 +516,7 @@ These are estimates from list-price ranges, not quotes, and nothing was spent.
   then **silently** switches to its custom T-learner (it logs only a warning). The committed artifacts say "CausalML", so they were
   built in a working env. I ran everything in a separate venv with numpy 2.4.6 (`eval_sop/requirements-eval.txt`).
   `requirements.txt` pins `numpy<2.1`; I did not test that exact pin. **Corrected 2026-10-07:** it is tested now —
-  everything in §11 ran at numpy 2.0.2 with causalml, pacmap and numba all importable, so the uplift stage went
+  everything in §11 ran at numpy 2.0.2 (pinned in `eval_sop/requirements-rerun.txt`) with causalml, pacmap and numba all importable, so the uplift stage went
   through CausalML rather than the fallback. On the ambient numpy 2.5 env `src/pipeline.py` does not reach the
   fallback at all: it dies at `import pacmap` in stage 2.
 
@@ -521,7 +524,7 @@ These are estimates from list-price ranges, not quotes, and nothing was spent.
 
 1. "I re-evaluated my churn pipeline against baselines. On 10,211 held-out Cell2Cell customers, its calibrated
    per-segment CatBoost models reached AUC 0.63 (95% CI 0.62–0.64), but a single global model trained the same way was
-   slightly and consistently better (ΔAUC −0.006 to −0.012 across five seeds, every paired CI excluding zero,
+   slightly and consistently better (ΔAUC −0.0071 to −0.0165 across five seeds, every paired CI excluding zero,
    uncorrected for multiple comparisons). I have corrected my project README accordingly."
    - Precise scope: the README correction is on branch `sop-eval`, not yet merged. The five seeds are overlapping splits
      of the same rows, so the across-seed spread is not a standard error.
@@ -531,7 +534,7 @@ These are estimates from list-price ranges, not quotes, and nothing was spent.
    were only marginally above a plain response model, and tied with it in one seed. Targeting by predicted risk — the
    exact reverse of the response-model ranking, so not an independent test — scored below zero in all five seeds."
 3. "Isotonic calibration cut expected calibration error from 0.20 to 0.015. The 17% Brier reduction I reported was
-   against uncalibrated, class-weighted outputs. Against a base-rate forecast the skill is ~4% (3.7% against
+   against uncalibrated, class-weighted outputs. Against a base-rate forecast the skill is ~4% (3.5% against
    segment-specific base rates)."
 4. (Agent, optional) "In a programmatic evaluation of my tool-using retention agent (40 customers × 3 seeds, local 7B
    model) I ran four arms to find out what actually drives its failures: the full agent; the same prompt with the tools
@@ -560,7 +563,7 @@ These are estimates from list-price ranges, not quotes, and nothing was spent.
 Applied on this branch (#6):
 - Per-segment bullet (README "Why it's shaped this way"): added the measured result that a global model was better.
 - Calibration section (generated): the 17% now says it is relative to the uncalibrated, class-weighted outputs. Brier
-  skill vs base rate is added beside it: 4.0%, and 3.5% vs per-segment base rates. These are computed from the committed
+  skill vs base rate is added beside it: 3.9%, and 3.4% vs per-segment base rates. These are computed from the committed
   artifacts at seed 42 (thread_count=-1), so they match this file's seed-42 values, not the 5-seed means.
 
 Proposed, not applied:
@@ -596,7 +599,7 @@ Proposed, not applied:
 | 17 | `c7c1159` | **Correction the review did not flag:** the "Lost Cause or Sleeping Dog" row printed 18.3% while labelling itself "(60 runs)" | Found while verifying R2 #5. 18.3% is 22/**120** — `agent_eval.py` averages that flag over all runs, not the 60 eligible ones, so the row was inconsistent with the 20/30 row above it | 22/60 = 36.7% [20.0, 55.0]; 22/120 = 18.3% [9.2, 29.2]. Both denominators now shown and labelled | The committed 18.3% is kept, as the figure `summary_ci.csv` reports |
 | 18 | `c7c1159` | §5: **the seeds are not independent**, so `± std` is not a standard error | R2 #6. **Verified** | `churn_eval.py:72` and `uplift_hillstrom.py:118` both `train_test_split` the *same* rows per seed. Overlap is ~20% (churn, 20% holdout) and ~30% (Hillstrom) between any two seeds' test sets | All `±` values; only their interpretation changed |
 | 19 | `c7c1159` | Added **"uncorrected"** wherever many CIs are reported (§1, §2, §4, §5, SOP sentence 1) | R2 #7. **Verified: no multiple-comparison control exists anywhere in the eval code.** §2 alone is 80 nominal intervals (8 scores × 5 seeds × 2 outcomes), of which ~4 would exclude zero by chance under a global null | Counted directly from `uplift_hillstrom_by_seed.csv` (80 rows) | No interval was recomputed or widened; they are valid individually |
-| 20 | `c7c1159` | §5: **no temporal validation is possible** | R2 #8. **Verified** | No datetime dtype in any of the 90 columns of `data/processed/segmented.parquet`; the time-flavoured fields (`MonthsInService`, `DaySinceLastOrder`, `CurrentEquipmentDays`) are durations from one unstated snapshot, not calendar dates. Hillstrom's 12 columns are a single cross-section | — |
+| 20 | `c7c1159` | §5: **no temporal validation is possible** | R2 #8. **Verified** | No datetime dtype in any column of `data/processed/segmented.parquet` (90 columns when this was checked; 36 after §10 and §11 trimmed it`; the time-flavoured fields (`MonthsInService`, `DaySinceLastOrder`, `CurrentEquipmentDays`) are durations from one unstated snapshot, not calendar dates. Hillstrom's 12 columns are a single cross-section | — |
 | 21 | `c7c1159` | §2 + SOP sentence 2: the **churn-score row is the reverse ranking of the response model**, so not an independent test | R2 #9. **Verified** | `uplift_hillstrom.py:84`: `"baseline_churn_score (highest P(no visit))": 1 - p_resp`. Qini depends only on the ranking, so this row is the response-model row inverted | The row itself, which is still the operational policy the README argues against |
 | 22 | `c7c1159` | §2: the **Qini normalisation is non-standard**, so 0.0028 is not comparable to published coefficients | R2 #10. **Verified** | `common.py:113-122` divides the area between the curves by `n`. Published Qini is normally the unnormalised area or the area ÷ perfect-targeting area. Added the conversion (≈54 incremental visits of area at n = 19,200) | The metric and every internal comparison, which the scaling supports |
 | 23a | `c7c1159` | §2 decile sentence: 0.086 → **0.085**, "1.9×" → **1.85×** | Found in a fidelity pass over every §2 number against the CSVs; not raised by the review | `uplift_hillstrom_deciles.csv`, ensemble, visit, mean over seeds: decile 1 = 0.08548, decile 10 = 0.04621, ratio 1.850. The CSV is unchanged by the re-run, so this was a pre-existing rounding slip | The substantive point (modest, partly non-monotone spread), now with the non-monotonicity named |
@@ -609,7 +612,7 @@ Proposed, not applied:
 | 27 | `9f225f3` | Strengthened two §4 findings into named subsections, per review follow-up, and corrected arm B's `runtime_s` | Both are separable defects, not footnotes; and the checkpoint replay had overwritten arm B's runtime with 2.1 s | (a) **Invalid-JSON rate is tool-loop-specific, not prompt and not context length** — arms B *and* D parsed 120/120 on the identical prompt, and arm D carries 3× arm B's context. Also notes the defect *flatters* the agent on do-not-contact metrics. (b) **Sure-Thing and Sleeping-Dog failures are two distinct defects** the aggregate was averaging: Sure Thing is 0% in **all four** LLM arms (model+prompt, tool-invariant), Sleeping Dog is the tool-driven one. Arm B's `runtime_s` restored to 596.6 with a `runtime_note` recording that the 2.1 s replay was a cache-hit reproduction check, not a timing | Both findings' underlying numbers unchanged |
 
 No change was made to `src/` or `dashboard/`, and no existing test was modified. `tests/test_known_defects.py` is new
-(round-2 #23), so the suite is now **82 passed** (`python -m pytest -q`), up from 73. `ruff check .` → all passed. Both
+(round-2 #23), so the suite was **82 passed** (`python -m pytest -q`) at this point, up from 73 — it is 119 after §10 and §11. `ruff check .` → all passed. Both
 were run before every commit in this phase.
 
 ## 9. Proposed, not done
@@ -685,7 +688,8 @@ the data" was true of `data/raw/` and false of `data/processed/`.
 allowlist; all seven `to_parquet` sites in `src/` project through
 `restrict_for_publication`, which a test now counts rather than taking on trust.
 `cell2cell_features.py` maps the raw telecom columns onto the e-commerce schema's
-names before anything is modelled, so all 23 churn features, all 13 clustering
+names before anything is modelled, so all 22 churn features (23 when that check
+was first run — see §11b), all 13 clustering
 features and all 9 uplift features survive the trim. `readme_metrics.py --check`
 still passes, `migrate_to_supabase.load_data()` still yields all 25 dashboard
 fields, every feature in `models/segment_models.pkl` and `models/scaler.pkl` is
@@ -829,7 +833,8 @@ become a missing dashboard field. Two more re-read the real raw headers when
 against the real files (58 columns for Cell2Cell, 20 for the e-commerce
 workbook), and they skip in a clone that has no raw data.
 
-Suite **82 → 98 passed**, `ruff check .` clean.
+Suite **82 → 100 tests**, of which 98 pass and 2 skip in a clone with no
+`data/raw/`. `ruff check .` clean.
 
 ## 11. Three dead or duplicated features, and two false numbers about them
 
@@ -890,24 +895,38 @@ Cell2Cell" — and then published in all four tracked parquets while being named
 no Cell2Cell feature set. No longer emitted on this path. The e-commerce path has
 a real `Gender` column and is untouched.
 
-### 11d. The README reported a 1-tree model as 500 trees
+### 11d. A latent reporting defect that would have published a 1-tree model as 500
 
-This one is worth more than the three above.
+This one is worth more than the three above, and the first version of this
+section overstated it. **No committed README ever printed 500** —
+`git show 48ffe08:README.md` shows `| Lapsed | … | 77 |`, which was correct for
+the model that existed then. The claim that CI had "verified a 500×
+overstatement on every push" asserted an event that did not happen. What follows
+is the defect, and the counterfactual, kept separate.
 
 ```python
 best_iteration = int(getattr(base_clf, "best_iteration_", None) or params["iterations"])
 ```
 
 CatBoost sets `best_iteration_` to **0** when the first iteration is the best.
-`0 or 500` is `500`. After 11a and 11b, the **Lapsed** segment began stopping at
-iteration 0 — it trains a single tree, `tree_count_ == 1` — and the README's
-"Trees" column printed **500**.
+`0 or 500` is `500`.
 
-A 500× overstatement, generated automatically by `scripts/readme_metrics.py` and
-**verified by CI on every push**. CI compares the README against
-`segment_models.pkl`'s recorded number, so it confirmed the README faithfully
-reported a figure that the model contradicts. The check was real; its subject was
-wrong.
+Before 11a and 11b no segment stopped at iteration 0, so the defect never fired.
+After them, the **Lapsed** segment does: it trains a single tree,
+`tree_count_ == 1`. Running `48ffe08`'s `train_segment_model` against the
+post-fix `segmented.parquet` confirms what would have been published:
+
+```
+OLD CODE on NEW data, Lapsed: best_iteration = 500 | holdout_auc = 0.5569
+```
+
+So the honest statement is **conditional**: had the three feature fixes landed
+without this one, the next `readme_metrics.py --write` would have put 500 in the
+"Trees" column for a one-tree model, and CI's `--check` would have passed —
+because `--check` compares the README against the number recorded in
+`segment_models.pkl`, not against the model. The check is real; its subject would
+have been wrong. That is the point worth keeping, and it does not need the
+500 to have shipped.
 
 Fixed in three places:
 
@@ -916,15 +935,25 @@ Fixed in three places:
   column headed "Trees" — which is what the heading claims. The other segments
   shift by one as a result (61→62, 41→42, 35→36, 167→168) because
   `tree_count_ == best_iteration_ + 1`.
-- It emits a **warning** when a segment produces ≤ 1 tree, saying that the
-  holdout AUC should be read as "no usable signal found" rather than as a score.
-  A warning and not an exception: the pipeline should still finish and publish
-  the number, just not quietly.
+- It emits a **warning** when a segment produces ≤ 1 tree. A warning and not an
+  exception: the pipeline should still finish and publish the number, just not
+  silently.
 
-So Lapsed's 0.557 is now labelled for what it is. A stump that early-stops on
-iteration 0 has found nothing in that segment, and its AUC was previously
-presented in the same table, in the same style, as At-Risk's 0.689 from a
-62-tree model.
+**What the Lapsed model actually is**, since an earlier draft of this section
+called it a stump with "no usable signal" and that is also overstated. It is one
+**depth-6** oblivious tree — not a single split. It produces 48 distinct scores
+over the segment, and 6 of its 22 features carry non-zero importance
+(`DiscountSensitivity` 29.3, `Tenure` 19.3, `RecencySignal` 19.1,
+`SatisfactionScore` 15.7, `SpendTrend` 8.8, `DaySinceLastOrder` 7.9). Its holdout
+AUC is 0.5569, and the within-segment AUC is 0.5569, 0.5868, 0.5564, 0.5553 and
+0.5651 across the five eval seeds — **weak, and reliably above chance in all
+five**, not nothing.
+
+The defensible reading is that one tree was enough to stop improving on the
+calibration split, which is a statement about how little headroom this segment
+has, not a claim that the segment is unpredictable. What was genuinely wrong
+before is that a 1-tree model's AUC appeared in the same table, in the same
+style, as At-Risk's 0.689 from a 62-tree model, with nothing to distinguish them.
 
 ### 11e. The reproduction check compared against a copy of the README
 
@@ -948,6 +977,12 @@ threshold set above the measured 0.0016 `thread_count` sensitivity and far below
 anything that changes a conclusion. Current deviations: **+0.0001, −0.0001,
 +0.0003, −0.0004, −0.0001**.
 
+The guarantee is one-directional and worth saying so: the parser iterates a fixed
+list of the five segment names, so it raises if one of them disappears, is
+renamed, loses its bold, or gains a column — all four verified — but a *sixth*
+segment appearing in the table would be silently ignored. Five is what
+`run_segmentation(n_clusters=5)` produces, so that is not live today.
+
 ### What changed in the numbers
 
 The honest summary is that **fixing the features made the headline model slightly
@@ -955,7 +990,7 @@ worse.**
 
 | | Before | After |
 | --- | --- | --- |
-| Mean holdout AUC (per segment) | 0.6236 | **0.6210** |
+| Mean holdout AUC (per segment) | 0.6236 | **0.6209** |
 | Mean train AUC | 0.7015 | 0.6954 |
 | Mean holdout Brier, raw → calibrated | 0.2342 → 0.1946 | 0.2343 → 0.1947 |
 | Churn-model features | 23 | 22 |
@@ -977,6 +1012,34 @@ Per segment:
 remains worse than a single global model on the same test rows in 5/5 seeds, with
 ΔAUC now −0.0081, −0.0071, −0.0128, −0.0165, −0.0096 (was −0.0062 to −0.0120) and
 every CI still excluding 0. The conclusion did not rest on the defects.
+
+**The mean hides a redistribution, and an earlier draft of this section let it.**
+"Mean train AUC 0.7015 → 0.6954" is a fall, and it is driven entirely by Lapsed
+collapsing from 0.659 to 0.565. Per segment, the train–holdout gap moved like
+this:
+
+| Segment | Gap before | Gap after | Change |
+| --- | --- | --- | --- |
+| Champions | 0.1684 | **0.2083** | **+0.0399** |
+| At-Risk | 0.0341 | 0.0448 | +0.0107 |
+| Loyal Customers | 0.0578 | 0.0645 | +0.0067 |
+| Price Sensitive | 0.0457 | 0.0461 | +0.0004 |
+| Lapsed | 0.0834 | 0.0084 | −0.0750 |
+
+**Champions is the one to watch.** Its trees went 95 → 168, its train AUC 0.759 →
+0.806 — now the only segment above 0.80 — and it bought 0.007 of holdout AUC for
+0.047 of train AUC. That is the largest train–holdout gap in the project and it
+widened the most.
+
+Two things keep this from being a demonstrated regression, both checked rather
+than assumed: the 168 iterations were chosen by early stopping on `X_cal`, and
+holdout AUC did improve slightly (0.5908 → 0.5976), with no deterioration in
+Brier or ECE. But `train_auc` is measured on the full 80% train split, which
+*includes* the `X_cal` rows that early stopping selected on — so the train figure
+is optimistic by construction for every segment, and more so for the segment that
+ran longest. The honest summary is that the gap is uninterpretable as an
+overfitting measure until `train_auc` is computed on `X_fit` alone, which is
+§9 work, not a number to argue about here.
 
 **Do not read this as "the fixes hurt the model."** Removing a duplicated feature
 and making a dead one informative changed what CatBoost's early stopping sees;
@@ -1008,7 +1071,9 @@ every row of §1.
 `tests/test_reporting_defects.py` (9). **13 of the 19 go red** when the four
 source files are reverted to `48ffe08` with the regenerated artifacts left in
 place — counted by doing exactly that and re-running, not by reasoning about it.
-Suite **98 → 119 passed**, `ruff check .` clean.
+Suite **100 → 119 tests**, `ruff check .` clean. The 100 is the count with
+`data/raw/` present; without it two schema-drift tests skip, and an earlier draft
+of this line quoted that passing count (98) as the total.
 
 Two of them assert the general form rather than the instance, because the
 specific defects are less interesting than their shape:
