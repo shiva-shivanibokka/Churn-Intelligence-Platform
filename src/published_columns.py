@@ -14,25 +14,50 @@ circulation is a Kaggle mirror whose licence field reads "Unknown". The raw CSV
 is correctly gitignored, so publishing the same values inside a parquet was an
 accident of carrying the whole frame to disk, not a decision.
 
-Nothing in this repository reads most of them. Of the 55 source columns in
-``uplift.parquet``, exactly three are named by any code that reads the file:
-``CustomerID``, ``Churn`` and ``MaritalStatus``. The rest are inert.
+Almost nothing in this repository reads them. Of the 55 source columns in
+``uplift.parquet``, two are needed: ``CustomerID`` as a join key, and ``Churn``
+as the label — without the label the committed artifacts cannot be checked
+against the reported metrics, which is the reason they are tracked at all.
 
-So the rule here is: **a column whose values come straight from the source
-dataset is not published unless something actually needs it.** Derived columns —
+So the rule is: **a column whose values come straight from the source dataset is
+not published unless something actually needs it.** Derived columns —
 composites, cluster assignments, model scores, uplift outputs — are this
 repository's own work and are published as before.
 
-Two source signals do survive, and saying so is the point of this module rather
-than something to leave implicit:
+**The rule is enforced against source column NAMES, which is weaker than it
+sounds.** ``engineer_features`` in ``src/cell2cell_features.py`` is largely a
+rename-and-clip table rather than a set of transformations, so several published
+columns still carry a dropped source column's values under another name.
+Measured against the raw CSV, the dropped source columns that stay essentially
+recoverable are:
 
-* ``MaritalStatus`` and ``Churn`` are source values, kept because readers name
-  them. ``Churn`` is the label; without it the committed artifacts cannot be
-  checked against the reported metrics at all.
-* ``Tenure`` and ``OrderCount`` are *derived* names and so survive the rule
-  automatically, but on the Cell2Cell path both are exact copies of the source
-  column ``MonthsInService`` (verified by comparison against the raw CSV). The
-  reduction is therefore large, not total: four source signals instead of 55.
+====================== ============================ =========================
+dropped source column  recoverable from (published) rows exactly recoverable
+====================== ============================ =========================
+MonthsInService        Tenure, OrderCount           100.00%
+RespondsToMailOffers   CouponUsed                   100.00%
+Occupation             PreferedOrderCat             100.00% (bijective encode)
+HandsetWebCapable      PreferredLoginDevice         100.00%
+MonthlyRevenue         AvgOrderValue                 99.99%
+CurrentEquipmentDays   DaySinceLastOrder             99.85%
+RoamingCalls           WarehouseToHome               99.73%
+UniqueSubs             NumberOfAddress               99.54%
+Handsets               NumberOfDeviceRegistered      97.75%
+CreditRating           SatisfactionScore             93.60%
+MonthlyMinutes         HourSpendOnApp                85.40%
+====================== ============================ =========================
+
+So the honest figure is that the source information still present covers roughly
+**13 of the 58 source columns** — the 2 allowlisted plus the 11 above, 8 of
+them near-exactly — not 55, and not the "four signals" an earlier version of
+this docstring claimed. The reduction is large; it is not total. Aliases that are
+heavily lossy are not counted as recoverable: ``Complain`` keeps 54.89% of
+``CustomerCareCalls`` (it is a ``> 3`` threshold), ``OrderAmountHikeFromlastYear``
+43.95% of ``PercChangeRevenues`` (negatives are clipped away), and ``CityTier``
+12.20% of ``IncomeGroup``.
+
+Removing the aliases is not an option — they are the models' actual features.
+The reduction available without breaking the models is the one taken here.
 
 Olist is not listed below. ``src/olist_features.py`` builds its frame by
 aggregating nine normalised tables into per-customer summaries, so its output
@@ -51,8 +76,9 @@ import pandas as pd
 # need any. `tests/test_published_columns.py` re-reads the real headers when the
 # raw files happen to be present, so these cannot drift silently.
 
-# data/raw/cell2cell/cell2celltrain.csv (58 columns; Customer_ID is renamed to
-# CustomerID by src/cell2cell_features.py).
+# data/raw/cell2cell/cell2celltrain.csv (58 columns). Both the train and the
+# holdout CSV already use `CustomerID`; cell2cell_features.py also tolerates a
+# `Customer_ID` spelling, but no file this dataset ships uses it.
 CELL2CELL_SOURCE_COLUMNS: frozenset[str] = frozenset({
     "CustomerID",
     "Churn", "MonthlyRevenue", "MonthlyMinutes", "TotalRecurringCharge",
@@ -113,9 +139,16 @@ PUBLISHABLE_SOURCE_COLUMNS: frozenset[str] = frozenset({
     # the reported AUC/Brier/churn-rate figures, which defeats the reason the
     # parquets are tracked at all.
     "Churn",
-    # Read by app.py and the retention prompts.
-    "MaritalStatus",
 })
+
+# `MaritalStatus` was in the list above, on the stated grounds that app.py and
+# the retention prompts read it. They do not — an adversarial review checked,
+# and neither file mentions it. The only other references are api/serve.py, where
+# it is a request-body field with a default and is never read from a parquet, and
+# the e-commerce churn feature set, which this module does not enforce. So it was
+# dropped. Recorded here rather than silently deleted, because the lesson is the
+# general one: an allowlist is only as good as the claim attached to each entry,
+# so each entry names its reader and the claim stays checkable.
 
 
 def forbidden_columns(dataset: str) -> frozenset[str]:

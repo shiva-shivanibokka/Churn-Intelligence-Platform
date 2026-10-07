@@ -10,10 +10,12 @@ mlruns/
 # can serve the pre-built models without re-running the pipeline.
 #
 # That is why data/raw/ being ignored is not on its own enough: the processed
-# parquets used to carry the source dataset's own feature values, and 52 of them
+# parquets used to carry the source dataset's own feature values, and 53 of them
 # were read by nothing. src/published_columns.py strips them on write and
-# tests/test_published_columns.py fails if a fat artifact is ever committed
-# again. Adding a parquet here does not relax that.
+# tests/test_published_columns.py fails if a Cell2Cell-built artifact carrying
+# them is committed again. Note the qualifier: the check is keyed on the dataset
+# recorded in models/pipeline_meta.json, and only cell2cell has a declared
+# schema, so e-commerce-built parquets would pass it vacuously.
 data/raw/
 catboost_info/
 *.zip

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -149,6 +150,55 @@ def test_declared_ecommerce_schema_matches_the_workbook_when_present():
 # ---------------------------------------------------------------------------
 # The restriction helper itself
 # ---------------------------------------------------------------------------
+
+
+def test_marital_status_is_not_published():
+    """It was allowlisted on the grounds that app.py reads it. app.py does not
+    mention it, so the allowance had no basis and was removed. Pinned so it is
+    not re-added without a reader to point at."""
+    assert "MaritalStatus" not in PUBLISHABLE_SOURCE_COLUMNS
+    assert "MaritalStatus" in forbidden_columns("cell2cell")
+    path = os.path.join(PROCESSED, "uplift.parquet")
+    if os.path.exists(path):
+        assert "MaritalStatus" not in pd.read_parquet(path).columns
+
+    app = Path(ROOT, "app.py").read_text(encoding="utf-8", errors="replace")
+    assert "MaritalStatus" not in app, (
+        "app.py now names MaritalStatus; if it reads it from a parquet the "
+        "allowlist needs revisiting, and this test needs rewriting rather than "
+        "deleting"
+    )
+
+
+def test_every_to_parquet_site_goes_through_the_projection():
+    """The claim 'all seven write sites are projected' was once false -- the Olist
+    one was not. Counting them in a test is cheaper than re-reading six files."""
+    src = Path(ROOT, "src")
+    unprojected = []
+    for f in sorted(src.glob("*.py")):
+        for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            if ".to_parquet(" in line and "restrict_for_publication" not in line:
+                unprojected.append(f"{f.name}:{n}")
+    assert not unprojected, (
+        f"these to_parquet calls bypass restrict_for_publication: {unprojected}"
+    )
+
+
+def test_eval_harness_does_not_select_raw_columns_by_position():
+    """eval_sop/churn_eval.py used to take its raw-column reference set as
+    `df.columns[:df.columns.index("Tenure")]`. When the parquets stopped
+    publishing the source columns that slice silently became one column and the
+    reference arm scored AUC 0.500 instead of 0.673 -- with no error. The string
+    scan that justified the trim could not see a positional access, which is the
+    real lesson. Pinned here because nothing else would catch its return."""
+    lines = Path(ROOT, "eval_sop", "churn_eval.py").read_text(encoding="utf-8").splitlines()
+    # Comments may discuss the old code -- the point is that none of it executes.
+    code = [ln for ln in lines if not ln.lstrip().startswith("#")]
+    offending = [ln.strip() for ln in code if 'index("Tenure")' in ln]
+    assert not offending, (
+        f"churn_eval.py is selecting raw columns by position again: {offending}"
+    )
+    assert any("load_raw_reference" in ln for ln in code)
 
 
 def test_restrict_drops_source_columns_and_keeps_derived_ones():

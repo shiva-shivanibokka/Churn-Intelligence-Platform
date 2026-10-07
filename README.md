@@ -831,28 +831,38 @@ for, and it is not evidence of an effect size.
 by the **Teradata Center for CRM at Duke University** (Neslin et al., 2006). The
 copy in general circulation is a
 [Kaggle mirror](https://www.kaggle.com/datasets/jpacse/datasets-for-churn-telecom)
-whose licence field reads **"Unknown"**. This repository therefore **does not
-redistribute it**: `data/raw/` is gitignored, and `src/cell2cell_features.py`
-expects you to download it yourself.
+whose licence field reads **"Unknown"**. This repository does not ship it:
+`data/raw/` is gitignored, and `src/cell2cell_features.py` expects you to
+download it yourself.
 
 That claim used to be only half true. The processed parquets under
 `data/processed/` are tracked on purpose, so the dashboard runs from a clone
 without re-running the pipeline — and they carried the source dataset's own
-feature values with them. 55 of `uplift.parquet`'s 103 columns were verbatim
-Cell2Cell columns, and nothing in this repository read 52 of them. They are now
+feature values with them. 55 of `uplift.parquet`'s 103 columns were Cell2Cell
+source columns, and nothing in this repository read 53 of them. They are now
 stripped on write, enforced by `src/published_columns.py` and
-`tests/test_published_columns.py`.
+`tests/test_published_columns.py`. Two source columns remain: `CustomerID` as a
+join key, and `Churn` as the label — without the label nobody can check the
+metrics below against the artifacts they are generated from.
 
-Four source signals do remain, and it is more useful to name them than to claim
-a clean break: `CustomerID`, `Churn` (the label — without it the committed
-artifacts cannot be checked against the reported metrics), `MaritalStatus`, and
-`MonthsInService`, which appears as both `Tenure` and `OrderCount`.
+**This is a large reduction, not a clean break, and the difference matters.**
+`engineer_features` is largely a rename-and-clip table rather than a set of
+transformations, so dropping a source column by *name* does not remove its
+*values*. `Tenure` and `OrderCount` are exact copies of `MonthsInService`;
+`AvgOrderValue` recovers `MonthlyRevenue` to 99.99% of rows; `PreferedOrderCat`
+is a bijective encode of `Occupation`. Eleven dropped source columns stay
+recoverable at 85–100% row exactness, so source information for roughly **13 of
+the 58 source columns** is still derivable from what is published. The full
+table, with the measured percentages, is in `src/published_columns.py` and
+`RESULTS.md` §10. These columns cannot be removed — they are the models' actual
+features.
 
 Other datasets: **Olist** ([Kaggle](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce),
 CC BY-NC-SA 4.0) is aggregated across nine tables into per-customer summaries.
 The **e-commerce** workbook is a Kaggle dataset whose source columns *are* the
 model's feature names, so the same strip cannot be applied to it without
-breaking the pipeline — see the note in `src/published_columns.py`.
+breaking the pipeline — which also means the guard is dataset-conditional. See
+the note in `src/published_columns.py`.
 
 ## License
 
