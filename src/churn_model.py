@@ -232,7 +232,27 @@ def train_segment_model(
         early_stopping_rounds=50,
         use_best_model=True,
     )
-    best_iteration = int(getattr(base_clf, "best_iteration_", None) or params["iterations"])
+    # `or` here was a live defect, not a style choice. CatBoost sets
+    # `best_iteration_` to 0 when the first iteration is the best one -- which
+    # happens, and did: the Lapsed segment trained a ONE-tree model, and `0 or
+    # 500` reported it as 500. The README's "Trees" column printed 500 for a
+    # model holding a single tree, a 500x overstatement generated automatically
+    # and checked by CI, because CI compares the README against this number
+    # rather than against the model.
+    #
+    # `tree_count_` is what the column claims to report, so it is what gets
+    # reported. `best_iteration` is kept alongside it because the early-stopping
+    # discussion below refers to it, and the two differ by one.
+    bi = getattr(base_clf, "best_iteration_", None)
+    best_iteration = int(bi) if bi is not None else int(params["iterations"])
+    tree_count = int(getattr(base_clf, "tree_count_", None) or best_iteration + 1)
+    if tree_count <= 1:
+        logger.warning(
+            "Segment %s produced a %d-tree model: early stopping fired on the "
+            "first iteration, so this segment's model is a stump and its holdout "
+            "AUC should be read as 'no usable signal found', not as a score.",
+            segment_name, tree_count,
+        )
 
     # ── Isotonic calibration ─────────────────────────────────────────────────
     cal_raw = base_clf.predict_proba(X_cal)[:, 1]
@@ -290,6 +310,7 @@ def train_segment_model(
         "holdout_brier_uncalibrated": holdout_brier_uncalibrated,
         "n_calibration": int(len(y_cal)),
         "best_iteration": best_iteration,
+        "tree_count": tree_count,
     }
 
     # MLflow logging
@@ -319,6 +340,7 @@ def train_segment_model(
                     "holdout_brier": holdout_brier,
                     "holdout_brier_uncalibrated": holdout_brier_uncalibrated,
                     "best_iteration": float(best_iteration),
+                    "tree_count": float(tree_count),
                     "churn_rate": float(y.mean()),
                     "n_train": float(len(y)),
                     "n_test": float(len(y_test)),

@@ -106,7 +106,12 @@ def build_section() -> str:
             f"| {seg} | {counts[seg]:,} | {churn_by_seg[seg] * 100:.1f}% | "
             f"**{m['holdout_auc']:.3f}** | {m['train_auc']:.3f} | "
             f"{m['holdout_brier_uncalibrated']:.4f} → {m['holdout_brier']:.4f} | "
-            f"{m['best_iteration']} |"
+            # The column is headed "Trees", so it reports trees. It used to print
+            # `best_iteration`, which is one less -- and which, before the `or`
+            # defect in train_segment_model was fixed, printed the 500-iteration
+            # cap for a model that had stopped at iteration 0. The Lapsed segment
+            # is a single tree; this column said 500.
+            f"{m.get('tree_count', m['best_iteration'] + 1)} |"
         )
 
     types = df["CustomerType"].value_counts()

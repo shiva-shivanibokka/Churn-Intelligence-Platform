@@ -4,6 +4,7 @@ __pycache__/
 .env
 src/__pycache__/
 mlruns/
+mlflow.db
 .pytest_cache/
 
 # data/processed/ and models/ are intentionally tracked so Streamlit Cloud

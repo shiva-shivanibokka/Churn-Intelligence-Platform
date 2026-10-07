@@ -15,7 +15,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -45,10 +47,43 @@ SEEDS = [42, 7, 13, 21, 99]
 THREAD_COUNT = 2
 FEATS = get_cell2cell_feature_sets()["churn_model"]
 
-README_HOLDOUT_AUC = {  # copied from README.md "Per-segment churn models" table
-    "At-Risk": 0.692, "Price Sensitive": 0.645, "Loyal Customers": 0.614,
-    "Champions": 0.591, "Lapsed": 0.576,
-}
+# The README figures this eval reproduces against are READ FROM THE README, not
+# copied into this file.
+#
+# They used to be a hardcoded dict, "copied from README.md". The README is
+# generated from the artifacts by scripts/readme_metrics.py, so the moment any
+# model changed the dict was stale -- and because the comparison is only printed,
+# never asserted, it went stale silently. It did: after the feature fixes the
+# README said Lapsed 0.557 while this dict still said 0.576, and the eval printed
+# both side by side without comment. A literal pinned to a number that is
+# regenerated elsewhere is a check that stops checking.
+README_TABLE_SEGMENTS = ("At-Risk", "Price Sensitive", "Loyal Customers", "Champions", "Lapsed")
+
+# How far the eval's re-run may sit from the published figure before it is called
+# out. CatBoost depends on thread_count -- the project trains with -1, this eval
+# pins 2 -- and that was measured at up to 0.0016 AUC. 0.01 is comfortably above
+# that and far below anything that would change a conclusion.
+REPRODUCTION_TOLERANCE = 0.01
+
+
+def read_readme_holdout_auc() -> dict[str, float]:
+    """Parse the per-segment holdout AUCs out of README.md's generated table."""
+    text = Path(ROOT, "README.md").read_text(encoding="utf-8")
+    out = {}
+    for seg in README_TABLE_SEGMENTS:
+        # | At-Risk | 8,400 | 26.4% | **0.689** | 0.734 | ... |
+        m = re.search(
+            rf"^\|\s*{re.escape(seg)}\s*\|[^|]*\|[^|]*\|\s*\*\*([0-9.]+)\*\*",
+            text, re.M,
+        )
+        if m is None:
+            raise RuntimeError(
+                f"Could not find a holdout AUC for segment {seg!r} in README.md. "
+                "The generated results table has changed shape, so this eval can "
+                "no longer tell whether it reproduces what is published."
+            )
+        out[seg] = float(m.group(1))
+    return out
 
 
 def fit_catboost_calibrated(X, y, seed):
@@ -243,18 +278,36 @@ def run_seed(df, seed, raw_ref, raw_cols):
 
 
 def reproduce_committed():
-    """Call the project's own train_segment_model (seed 42 hard-coded) and compare to README."""
+    """Call the project's own train_segment_model (seed 42 hard-coded) and compare
+    to what README.md currently publishes."""
+    readme_auc = read_readme_holdout_auc()
     df = pd.read_parquet(os.path.join(ROOT, "data", "processed", "segmented.parquet"))
-    out = []
-    for seg in README_HOLDOUT_AUC:
+    out, drifted = [], []
+    for seg, published in readme_auc.items():
         sub = df[df.Segment == seg]
         r = churn_model.train_segment_model(sub, sub["Churn"], seg, FEATS, mlflow_run=False)
         m = r["metrics"]
-        out.append({"segment": seg, "readme_holdout_auc": README_HOLDOUT_AUC[seg],
+        delta = round(m["holdout_auc"] - published, 4)
+        if abs(delta) > REPRODUCTION_TOLERANCE:
+            drifted.append((seg, published, round(m["holdout_auc"], 4), delta))
+        out.append({"segment": seg, "readme_holdout_auc": published,
                     "reproduced_holdout_auc": round(m["holdout_auc"], 4),
+                    "delta_vs_readme": delta,
                     "holdout_brier_uncal": round(m["holdout_brier_uncalibrated"], 4),
                     "holdout_brier_cal": round(m["holdout_brier"], 4),
-                    "n_test": m["n_test"], "test_churn_rate": float(r["y_test"].mean())})
+                    "n_test": m["n_test"], "test_churn_rate": float(r["y_test"].mean()),
+                    "tree_count": m.get("tree_count")})
+    if drifted:
+        print(
+            "\n*** REPRODUCTION WARNING: the re-run differs from README.md by more "
+            f"than {REPRODUCTION_TOLERANCE} AUC for {len(drifted)} segment(s):"
+        )
+        for seg, pub, got, d in drifted:
+            print(f"      {seg}: README {pub}, re-run {got} (delta {d:+.4f})")
+        print(
+            "    Either the README was not regenerated after a model change, or "
+            "training is not reproducible at this seed. Both matter.\n"
+        )
     return out
 
 

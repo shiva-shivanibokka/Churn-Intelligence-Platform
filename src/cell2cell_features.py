@@ -114,9 +114,23 @@ def clean_cell2cell(df: pd.DataFrame) -> pd.DataFrame:
     if "CreditRating" in df.columns:
         df["CreditRating"] = df["CreditRating"].map(CREDIT_RATING_MAP).fillna(2)
 
-    # Homeownership → binary (Known Owner = 1, else 0)
+    # Homeownership → binary (known homeowner = 1, unknown = 0)
+    #
+    # This compared against the string "known homeowner", which no value in the
+    # dataset takes: the column holds "Known" and "Unknown". So every row became
+    # 0, `Homeownership` was constant, and `PreferredPaymentMode` -- which is
+    # mapped from it in engineer_features -- was a dead feature inside the churn
+    # model. The real split is 33,987 Known / 17,060 Unknown.
     if "Homeownership" in df.columns:
-        df["Homeownership"] = (df["Homeownership"].astype(str).str.lower() == "known homeowner").astype(int)
+        known = df["Homeownership"].astype(str).str.strip().str.lower()
+        df["Homeownership"] = (known == "known").astype(int)
+        if df["Homeownership"].nunique() < 2:
+            raise ValueError(
+                "Homeownership collapsed to a single value after encoding. That is "
+                "how this column silently became a dead feature once before, so it "
+                "is refused rather than passed on. Observed raw values: "
+                f"{sorted(set(known))[:10]}"
+            )
 
     # IncomeGroup → numeric (strip if it's a string like "1" or "IncomeGroup1")
     if "IncomeGroup" in df.columns:
@@ -166,6 +180,10 @@ def engineer_features(df: pd.DataFrame, norms: dict | None = None) -> pd.DataFra
     - UniqueSubs           → NumberOfAddress
     - IncomeGroup          → CityTier
     - Occupation           → PreferedOrderCat
+    - Homeownership        → PreferredPaymentMode (known/unknown homeowner)
+
+    Not mapped: Gender has no Cell2Cell equivalent and is not emitted. OrderCount
+    is emitted for the dashboard but equals Tenure, so only Tenure is modelled.
     """
     df = df.copy()
 
@@ -174,7 +192,14 @@ def engineer_features(df: pd.DataFrame, norms: dict | None = None) -> pd.DataFra
     df["Tenure"] = df[tenure_col].clip(lower=1) if tenure_col else 12
 
     df["AvgOrderValue"] = df.get("MonthlyRevenue", pd.Series(50, index=df.index)).fillna(50).clip(lower=0)
-    df["OrderCount"] = df["Tenure"]  # billing cycles ≈ months subscribed
+    # Billing cycles ≈ months subscribed, so on this dataset OrderCount IS Tenure.
+    # The column stays because the dashboard and the Supabase `customers` table
+    # have an order-count field, but it is no longer offered to the models: it was
+    # in `churn_model` alongside `Tenure`, so every per-segment model received the
+    # same 56-valued column twice. `clustering` asks for `Tenure` directly now --
+    # numerically identical, so the segments are unchanged, and the feature name no
+    # longer says "orders" for a telecom subscriber who has none.
+    df["OrderCount"] = df["Tenure"]
 
     df["HourSpendOnApp"] = (
         df.get("MonthlyMinutes", pd.Series(0, index=df.index)).fillna(0) / 100
@@ -213,7 +238,11 @@ def engineer_features(df: pd.DataFrame, norms: dict | None = None) -> pd.DataFra
         le = LabelEncoder()
         df["MaritalStatus"] = le.fit_transform(df["MaritalStatus"].astype(str))
 
-    df["Gender"] = 0  # not in Cell2Cell
+    # Cell2Cell carries no gender field. This used to emit a hardcoded `Gender = 0`
+    # for all 51,047 rows: a constant column published in every tracked parquet,
+    # named in no Cell2Cell feature set, and informative to nothing. Omitted
+    # rather than shipped as a zero. (The e-commerce path has a real Gender column
+    # and is untouched.)
     df["PreferredLoginDevice"] = df.get("HandsetWebCapable", pd.Series(0, index=df.index)).fillna(0).astype(int)
 
     # ── Behavioral composites ────────────────────────────────────────────────
@@ -229,16 +258,25 @@ def engineer_features(df: pd.DataFrame, norms: dict | None = None) -> pd.DataFra
 
 def get_cell2cell_feature_sets() -> dict:
     return {
+        # `OrderCount` was here and is now `Tenure`. On this dataset the two hold
+        # identical values (see engineer_features), so the clustering input matrix
+        # is unchanged and the segments are identical -- this is a rename, not a
+        # model change. `Tenure` is simply the true name of what the column holds.
         "clustering": [
             "EngagementScore", "RecencySignal", "StickinessIndex", "SpendTrend",
             "SupportRiskScore", "DiscountSensitivity", "TenureStability",
-            "WarehouseFriction", "CityTier", "HourSpendOnApp", "OrderCount",
+            "WarehouseFriction", "CityTier", "HourSpendOnApp", "Tenure",
             "NumberOfDeviceRegistered", "SatisfactionScore",
         ],
+        # `OrderCount` was here too, next to `Tenure`, and here it WAS a model
+        # change: the two are the same column, so each per-segment model was fed it
+        # twice. Dropped, leaving 22 features. `PreferredPaymentMode` stays and is
+        # now informative rather than constant -- see the Homeownership fix in
+        # clean_cell2cell.
         "churn_model": [
             "Tenure", "CityTier", "WarehouseToHome", "HourSpendOnApp",
             "NumberOfDeviceRegistered", "SatisfactionScore", "NumberOfAddress",
-            "Complain", "OrderAmountHikeFromlastYear", "CouponUsed", "OrderCount",
+            "Complain", "OrderAmountHikeFromlastYear", "CouponUsed",
             "DaySinceLastOrder", "CashbackAmount", "PreferredPaymentMode",
             "PreferedOrderCat", "EngagementScore", "RecencySignal", "StickinessIndex",
             "SpendTrend", "SupportRiskScore", "DiscountSensitivity",

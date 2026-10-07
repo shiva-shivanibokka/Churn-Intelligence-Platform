@@ -17,7 +17,7 @@
 
 - **What it does:** Segments customers behaviorally, predicts churn per cohort with calibrated probabilities, identifies the subset worth spending retention budget on (uplift modeling), and deploys a 12-tool ReAct AI agent that reasons over SHAP drivers, intervention history, and ROI before generating and saving a personalized retention plan.
 - **Hardest problem solved:** Replacing a naive "email everyone above 0.7 churn probability" approach with causal uplift modeling (CausalML T-Learner + S-Learner) to distinguish Persuadables from Lost Causes and Sleeping Dogs — the same targeting logic Uber open-sourced CausalML to solve.
-- **Verified results, generated from the artifacts rather than typed:** holdout AUC 0.576–0.692 across 5 segments; isotonic calibration cutting held-out Brier from 0.2342 to 0.1946; cluster stability mean ARI 0.915 over 100 seeded bootstrap resamplings; 7,602 Persuadables on the Cell2Cell dataset. Every one of those figures is written by `scripts/readme_metrics.py` and re-checked in CI — see [Results](#results).
+- **Verified results:** holdout AUC 0.557–0.689 across 5 segments; isotonic calibration cutting held-out Brier from 0.2343 to 0.1947; cluster stability mean ARI 0.915 over 100 seeded bootstrap resamplings; 7,788 Persuadables on the Cell2Cell dataset. The [Results](#results) section itself is written by `scripts/readme_metrics.py` and re-checked in CI; **this bullet is hand-typed**, which is why it once carried figures from an earlier run than the table below it. One segment's 0.557 comes from a single-tree model — read it as "no usable signal in that segment", and see `RESULTS.md` §11d.
 - **The bug worth reading about:** the uplift score's sign was inverted, so for months the "Persuadables" this system recommended contacting were precisely the customers its own model predicted contact would drive away. It produced a ranked list, plausible ROI and a working dashboard the entire time. [What happened, and the check that now runs every pipeline](#results).
 
 ---
@@ -408,15 +408,16 @@ CRON_SECRET=any-long-random-string
 ```
 [Stage 1] Feature Engineering — 51,047 customers, 8 composite features
 [Stage 2] Segmentation — k=5, stability mean ARI=0.915 (Highly Stable)
-[Stage 3] Churn Prediction — per-segment CatBoost, holdout AUC 0.576–0.692
-[Stage 4] Uplift Modeling — 7,602 Persuadables, 18,222 Lost Causes
+[Stage 3] Churn Prediction — per-segment CatBoost, holdout AUC 0.557–0.689
+          WARNING  Segment Lapsed produced a 1-tree model: ... 'no usable signal found'
+[Stage 4] Uplift Modeling — 7,788 Persuadables, 19,112 Lost Causes
           Uplift direction check passed — treated top decile churns 0.255 vs bottom 0.425
 
 CustomerType distribution:
-  Sleeping Dog      22,492
-  Lost Cause        18,222
-  Persuadable        7,602
-  Sure Thing         2,731
+  Sleeping Dog      21,602
+  Lost Cause        19,112
+  Persuadable        7,788
+  Sure Thing         2,545
 ```
 
 **Classify a customer programmatically (from `uplift_model.py`):**
@@ -709,13 +710,13 @@ changes and this section is not regenerated, the build fails. Dataset:
 
 | Segment | Customers | Churn rate | Holdout AUC | Train AUC | Holdout Brier (raw → calibrated) | Trees |
 |---|---|---|---|---|---|---|
-| At-Risk | 8,400 | 26.4% | **0.692** | 0.726 | 0.2197 → 0.1778 | 64 |
-| Price Sensitive | 12,966 | 30.0% | **0.645** | 0.691 | 0.2327 → 0.2001 | 39 |
-| Loyal Customers | 9,553 | 28.0% | **0.614** | 0.672 | 0.2368 → 0.1955 | 26 |
-| Champions | 8,153 | 23.9% | **0.591** | 0.759 | 0.2367 → 0.1798 | 95 |
-| Lapsed | 11,975 | 33.3% | **0.576** | 0.659 | 0.2453 → 0.2197 | 77 |
+| At-Risk | 8,400 | 26.4% | **0.689** | 0.734 | 0.2202 → 0.1779 | 62 |
+| Price Sensitive | 12,966 | 30.0% | **0.646** | 0.692 | 0.2328 → 0.2005 | 42 |
+| Loyal Customers | 9,553 | 28.0% | **0.615** | 0.680 | 0.2369 → 0.1955 | 36 |
+| Champions | 8,153 | 23.9% | **0.598** | 0.806 | 0.2319 → 0.1794 | 168 |
+| Lapsed | 11,975 | 33.3% | **0.557** | 0.565 | 0.2498 → 0.2204 | 1 |
 
-**Mean holdout AUC 0.624**, against 0.702 on the rows the
+**Mean holdout AUC 0.621**, against 0.695 on the rows the
 models were fitted on. That gap is the honest one, and reporting the holdout
 number is the whole point of the split — an earlier version of this README
 quoted 0.789–0.859, which were neither: they were carried over from a run on a
@@ -728,31 +729,31 @@ giving each model a fifth of the rows and a narrower slice of variation.
 
 ### What calibration is worth
 
-**Brier 0.2342 → 0.1946** on held-out rows, a
+**Brier 0.2343 → 0.1947** on held-out rows, a
 17% reduction relative to the uncalibrated, class-weighted
 outputs. Against a constant base-rate forecast the calibrated models' Brier skill
-is 4.0% (3.5% against each segment's own base rate), so
+is 3.9% (3.4% against each segment's own base rate), so
 calibration makes the probabilities honest; it does not make the model a strong
 predictor. Calibration cannot change
 AUC — it is a monotone map, so the ranking is identical by construction — which
 is exactly why the pair of Brier scores is the number that means anything.
 
 The clearest way to see it: predicted churn now averages
-**0.2882** against an actual churn rate of
+**0.2891** against an actual churn rate of
 **0.2882**. Uncalibrated, these models are trained with
 `class_weights=[1, pos_weight]`, which inflates the positive class on purpose,
 and their probabilities are then multiplied by CLV to rank retention spend.
 
-This is also why only **322 customers** are High Risk
+This is also why only **222 customers** are High Risk
 (calibrated P(churn) ≥ 0.6) rather than the tens of thousands an earlier version
 of this README reported. That larger figure was not a finding; it was the
 weighting artifact, read as risk.
 
 | Risk tier | Customers |
 |---|---|
-| High Risk (≥ 0.60) | 322 |
-| Medium Risk (0.30–0.60) | 25,502 |
-| Low Risk (< 0.30) | 25,223 |
+| High Risk (≥ 0.60) | 222 |
+| Medium Risk (0.30–0.60) | 26,678 |
+| Low Risk (< 0.30) | 24,147 |
 
 ### Segmentation stability
 
@@ -766,10 +767,10 @@ run while the README quoted it to three decimals.
 
 | Customer type | Count | Meaning |
 |---|---|---|
-| Persuadable | 7,602 | High churn risk **and** responds to intervention — the target list |
-| Sure Thing | 2,731 | Would respond, but is not at risk — no spend needed |
-| Lost Cause | 18,222 | At risk, but intervention does not help |
-| Sleeping Dog | 22,492 | Not at risk, and contact makes things worse — do not disturb |
+| Persuadable | 7,788 | High churn risk **and** responds to intervention — the target list |
+| Sure Thing | 2,545 | Would respond, but is not at risk — no spend needed |
+| Lost Cause | 19,112 | At risk, but intervention does not help |
+| Sleeping Dog | 21,602 | Not at risk, and contact makes things worse — do not disturb |
 
 `UpliftScore` is `mu_0 - mu_1`: **positive means the intervention reduces this
 customer's churn probability.** That convention is checked against observed

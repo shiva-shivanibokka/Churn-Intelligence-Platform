@@ -55,19 +55,32 @@ Columns:
 | Model | AUC | PR-AUC (base 0.288) | Brier | Skill vs base rate | Skill vs segment base rate | ECE |
 |---|---|---|---|---|---|---|
 | Base rate (constant 0.288) | 0.500 | 0.288 | 0.2051 | 0 | −0.5% | 0 |
-| Logistic regression (23 project features) | 0.594 ± 0.003 | 0.352 ± 0.003 | 0.2008 | 2.1% ± 0.2 | 1.6% ± 0.2 | 0.008 |
-| **Per-segment CatBoost + isotonic (project)** | **0.631 ± 0.006** [0.621, 0.643] | 0.393 ± 0.009 [0.372, 0.405] | 0.1966 | **4.1% ± 0.5** [3.1, 4.9] | **3.7% ± 0.5** | 0.015 [0.009, 0.024] |
-| Per-segment CatBoost, uncalibrated | 0.623 ± 0.006 | 0.392 ± 0.008 | 0.2360 | −15.1% ± 1.0 | −15.6% ± 1.0 | 0.197 |
-| Global CatBoost + isotonic (same recipe, same features) | **0.640 ± 0.004** [0.627, 0.651] | 0.400 ± 0.003 | 0.1946 | 5.2% ± 0.2 [4.1, 5.9] | 4.7% ± 0.2 | 0.008 |
-| Global CatBoost + isotonic + segment id | 0.640 ± 0.003 | 0.403 ± 0.004 | 0.1947 | 5.1% ± 0.1 | 4.6% ± 0.1 | 0.009 |
-| *Reference:* global CatBoost on all raw Cell2Cell columns | 0.673 ± 0.005 | 0.440 ± 0.005 | 0.1892 | 7.8% ± 0.4 | 7.3% ± 0.4 | 0.008 |
+| Logistic regression (22 project features) | 0.594 ± 0.003 | 0.351 ± 0.003 | 0.2008 | 2.1% ± 0.2 | 1.6% ± 0.2 | 0.009 |
+| **Per-segment CatBoost + isotonic (project)** | **0.629 ± 0.006** [0.619, 0.642] | 0.391 ± 0.008 [0.371, 0.403] | 0.1970 | **4.0% ± 0.5** [3.0, 4.8] | **3.5% ± 0.5** | 0.015 [0.012, 0.027] |
+| Per-segment CatBoost, uncalibrated | 0.620 ± 0.004 | 0.388 ± 0.007 | 0.2360 | −15.0% ± 0.6 | −15.6% ± 0.6 | 0.196 |
+| Global CatBoost + isotonic (same recipe, same features) | **0.640 ± 0.004** [0.626, 0.650] | 0.402 ± 0.005 | 0.1948 | 5.1% ± 0.2 [4.0, 5.9] | 4.6% ± 0.2 | 0.009 |
+| Global CatBoost + isotonic + segment id | 0.640 ± 0.003 | 0.403 ± 0.004 | 0.1945 | 5.2% ± 0.3 | 4.7% ± 0.3 | 0.009 |
+| *Reference:* global CatBoost on all raw Cell2Cell columns | 0.673 ± 0.005 [0.665, 0.687] | 0.443 ± 0.005 | 0.1890 | 7.9% ± 0.3 [6.9, 9.0] | 7.4% ± 0.3 | 0.011 |
+
+> **Re-measured 2026-10-07** after the three feature defects in §11 were fixed, so
+> these differ slightly from the figures this section carried before. The project
+> model moved 0.631 → 0.629 and the logistic-regression row now has 22 features
+> rather than 23. The reference arm reproduced at 0.6734 against the 0.673 it was
+> published at, which is what confirmed the §10a fix to how that arm selects its
+> columns. Every figure here comes from a single run of
+> `eval_sop/churn_eval.py` whose per-seed outputs are in `eval_sop/results/`; a
+> second run of the whole pipeline and eval reproduced all of them exactly. The
+> bracketed 95% bootstrap CIs are seed 42's, as before, and remain uncorrected for
+> multiple comparisons; the full set for every arm and seed, including the
+> per-segment within-AUCs, is in `eval_sop/results/churn_metrics_by_seed.csv`.
 
 **Per-segment vs global, paired on the same test rows** (`churn_perseg_vs_global_paired.csv`):
-- ΔAUC (per-segment minus global) is −0.0068, −0.0062, −0.0120, −0.0109 and −0.0101 for seeds 42, 7, 13, 21 and 99.
-  **Every 95% CI excludes 0** (uncorrected, and the five seeds share most of their test rows).
+- ΔAUC (per-segment minus global) is −0.0081, −0.0071, −0.0128, −0.0165 and −0.0096 for seeds 42, 7, 13, 21 and 99.
+  **Every 95% CI excludes 0** (uncorrected, and the five seeds share most of their test rows). The fixes in §11 made this
+  gap slightly *wider*, not narrower: the conclusion did not depend on the defects.
 - ΔBrier is positive (per-segment worse) in 5/5 seeds, and every CI excludes 0 (uncorrected).
-- Within each of the 5 segments, the global model's mean AUC is higher than that segment's own model (e.g. At-Risk 0.683
-  vs 0.674, Lapsed 0.574 vs 0.567).
+- Within each of the 5 segments, the global model's mean AUC is higher than that segment's own model: mean within-segment
+  AUC 0.6300 global vs 0.6189 per-segment, in 5/5 seeds.
 
 What this supports:
 - The pipeline is reproducible, and its holdout numbers are honest.
@@ -499,7 +512,10 @@ These are estimates from list-price ranges, not quotes, and nothing was spent.
 - Environment: the base anaconda env has numpy 2.5, which breaks numba, so `import causalml` fails. `src/uplift_model.py`
   then **silently** switches to its custom T-learner (it logs only a warning). The committed artifacts say "CausalML", so they were
   built in a working env. I ran everything in a separate venv with numpy 2.4.6 (`eval_sop/requirements-eval.txt`).
-  `requirements.txt` pins `numpy<2.1`; I did not test that exact pin.
+  `requirements.txt` pins `numpy<2.1`; I did not test that exact pin. **Corrected 2026-10-07:** it is tested now —
+  everything in §11 ran at numpy 2.0.2 with causalml, pacmap and numba all importable, so the uplift stage went
+  through CausalML rather than the fallback. On the ambient numpy 2.5 env `src/pipeline.py` does not reach the
+  fallback at all: it dies at `import pacmap` in stage 2.
 
 ## 6. SOP-ready sentences (each is backed by a file in `eval_sop/results/`)
 
@@ -785,24 +801,16 @@ elsewhere: **everything mechanically re-derivable from a file was exact — the
 column counts, the byte counts, the row counts, the feature-set survival — and
 everything that required a judgement about what some code does was not.**
 
-### Found while doing this, not fixed
+### Found while doing this, fixed in section 11
 
-Three defects of the same class, all recorded rather than quietly dropped. None
-is fixed here because each changes every per-segment model and therefore every
-AUC, Brier and churn-rate figure the README reports — that is separate work with
-its own re-measurement, and it belongs with §9.
+Three defects of the same class were found here and recorded rather than quietly
+changed, on the grounds that each moves every reported figure: `Tenure` and
+`OrderCount` are the same column and both were in the churn feature list;
+`PreferredPaymentMode` was constant; `Gender` was hardcoded to 0.
 
-- **`Tenure` and `OrderCount` are the same column.** `df["Tenure"].equals(df["OrderCount"])`
-  is `True` (`cell2cell_features.py` sets `OrderCount = Tenure` outright), and
-  **both appear in the `churn_model` feature list**. Each per-segment model is fed
-  the same 56-valued column twice.
-- **`PreferredPaymentMode` is constant.** `nunique() == 1`, all zeros.
-  `cell2cell_features.py` tests `Homeownership == "known homeowner"`, and no raw
-  value matches that string. It is in the `churn_model` feature list for both the
-  Cell2Cell and the e-commerce path, contributing nothing.
-- **`Gender` is constant.** Hardcoded to `0` with the comment "not in Cell2Cell",
-  which is honest, but it is still in the e-commerce `churn_model` list and so is
-  a dead feature on that path.
+**All three are now fixed and everything they touched was re-measured — see
+section 11**, which also records two further defects that fixing them exposed, in
+how the project reports on itself rather than in the model.
 
 ### Tests
 
@@ -822,3 +830,198 @@ against the real files (58 columns for Cell2Cell, 20 for the e-commerce
 workbook), and they skip in a clone that has no raw data.
 
 Suite **82 → 98 passed**, `ruff check .` clean.
+
+## 11. Three dead or duplicated features, and two false numbers about them
+
+§10 recorded three defects and declined to fix them, on the grounds that each one
+moves every figure the README reports. That was the right call at the time and
+the wrong place to stop: the figures were wrong either way, and "wrong but
+unchanged" is not a property worth preserving. All three are fixed here, the
+pipeline was re-run, and every affected number was re-measured rather than
+adjusted.
+
+Fixing them surfaced two more defects of the same family — not in the model, in
+how the project reports on itself. Those are §11d and §11e, and they are the more
+interesting pair.
+
+### 11a. `PreferredPaymentMode` was constant because of a string that never matched
+
+`clean_cell2cell` encoded homeownership as:
+
+```python
+df["Homeownership"] = (df["Homeownership"].astype(str).str.lower() == "known homeowner").astype(int)
+```
+
+The column holds **`"Known"`** and **`"Unknown"`**. Nothing is ever equal to
+`"known homeowner"`, so all 51,047 rows became 0, and `PreferredPaymentMode` —
+which `engineer_features` maps from it — was a constant inside the `churn_model`
+feature list. The real split is **33,987 Known / 17,060 Unknown**.
+
+Fixed by comparing against `"known"`. `clean_cell2cell` now **raises** if the
+column collapses to a single value after encoding, because the original failure
+was silent and that is what let it survive a full pipeline run, a CI pass and an
+independent review.
+
+### 11b. `OrderCount` was `Tenure`, and the model was fed both
+
+`engineer_features` set `df["OrderCount"] = df["Tenure"]` outright, and **both
+names were in the `churn_model` list**, so every per-segment model received the
+same 56-valued column twice.
+
+Two different fixes, because the two feature sets had two different problems:
+
+- `churn_model` had both, so this was a real model change: `OrderCount` dropped,
+  **23 → 22 features**.
+- `clustering` had `OrderCount` and *not* `Tenure`, so it was not duplicated
+  there — just misnamed. Renamed to `Tenure`, which is numerically inert: the
+  clustering input matrix is bit-identical, asserted with
+  `np.array_equal` before the re-run and confirmed after it (identical segment
+  sizes 12,966 / 11,975 / 9,553 / 8,400 / 8,153, identical stability ARI
+  0.9152 ± 0.136).
+
+The column is still emitted, because the Supabase `customers` table and the
+dashboard both have an order-count field. On this dataset its documented meaning
+is tenure in months; Cell2Cell subscribers place no orders.
+
+### 11c. `Gender` was a published constant
+
+`df["Gender"] = 0` for all 51,047 rows, with the honest comment "not in
+Cell2Cell" — and then published in all four tracked parquets while being named in
+no Cell2Cell feature set. No longer emitted on this path. The e-commerce path has
+a real `Gender` column and is untouched.
+
+### 11d. The README reported a 1-tree model as 500 trees
+
+This one is worth more than the three above.
+
+```python
+best_iteration = int(getattr(base_clf, "best_iteration_", None) or params["iterations"])
+```
+
+CatBoost sets `best_iteration_` to **0** when the first iteration is the best.
+`0 or 500` is `500`. After 11a and 11b, the **Lapsed** segment began stopping at
+iteration 0 — it trains a single tree, `tree_count_ == 1` — and the README's
+"Trees" column printed **500**.
+
+A 500× overstatement, generated automatically by `scripts/readme_metrics.py` and
+**verified by CI on every push**. CI compares the README against
+`segment_models.pkl`'s recorded number, so it confirmed the README faithfully
+reported a figure that the model contradicts. The check was real; its subject was
+wrong.
+
+Fixed in three places:
+
+- `train_segment_model` no longer defaults with `or`: `0` stays `0`.
+- It records `tree_count` as well, and `readme_metrics.py` reports that in the
+  column headed "Trees" — which is what the heading claims. The other segments
+  shift by one as a result (61→62, 41→42, 35→36, 167→168) because
+  `tree_count_ == best_iteration_ + 1`.
+- It emits a **warning** when a segment produces ≤ 1 tree, saying that the
+  holdout AUC should be read as "no usable signal found" rather than as a score.
+  A warning and not an exception: the pipeline should still finish and publish
+  the number, just not quietly.
+
+So Lapsed's 0.557 is now labelled for what it is. A stump that early-stops on
+iteration 0 has found nothing in that segment, and its AUC was previously
+presented in the same table, in the same style, as At-Risk's 0.689 from a
+62-tree model.
+
+### 11e. The reproduction check compared against a copy of the README
+
+`eval_sop/churn_eval.py` had:
+
+```python
+README_HOLDOUT_AUC = {  # copied from README.md "Per-segment churn models" table
+    "At-Risk": 0.692, "Price Sensitive": 0.645, ...
+}
+```
+
+The README is **generated** from the artifacts, so this dict was stale the moment
+any model changed — and the comparison is only *printed*, never asserted. It duly
+printed `README 0.576` beside `re-run 0.557` with no comment, in a section headed
+"reproduce the committed numbers".
+
+It now parses the README's generated table, raises if the table has changed shape
+rather than reproducing against a partial set of segments, and prints a loud
+**REPRODUCTION WARNING** when any segment deviates by more than 0.01 AUC — a
+threshold set above the measured 0.0016 `thread_count` sensitivity and far below
+anything that changes a conclusion. Current deviations: **+0.0001, −0.0001,
++0.0003, −0.0004, −0.0001**.
+
+### What changed in the numbers
+
+The honest summary is that **fixing the features made the headline model slightly
+worse.**
+
+| | Before | After |
+| --- | --- | --- |
+| Mean holdout AUC (per segment) | 0.6236 | **0.6210** |
+| Mean train AUC | 0.7015 | 0.6954 |
+| Mean holdout Brier, raw → calibrated | 0.2342 → 0.1946 | 0.2343 → 0.1947 |
+| Churn-model features | 23 | 22 |
+| Persuadables | 7,602 | **7,788** |
+| High-risk customers | 322 | 222 |
+| Cluster stability (mean ARI) | 0.9152 ± 0.136 | 0.9152 ± 0.136 (unchanged by construction) |
+
+Per segment:
+
+| Segment | AUC before | AUC after | Trees before (as published) | Trees after (true) |
+| --- | --- | --- | --- | --- |
+| At-Risk | 0.692 | 0.689 | 64 | 62 |
+| Price Sensitive | 0.645 | 0.646 | 39 | 42 |
+| Loyal Customers | 0.614 | 0.615 | 26 | 36 |
+| Champions | 0.591 | 0.598 | 95 | 168 |
+| Lapsed | 0.576 | **0.557** | 77 | **1** |
+
+**The central finding of §1 survives and is slightly stronger.** Per-segment
+remains worse than a single global model on the same test rows in 5/5 seeds, with
+ΔAUC now −0.0081, −0.0071, −0.0128, −0.0165, −0.0096 (was −0.0062 to −0.0120) and
+every CI still excluding 0. The conclusion did not rest on the defects.
+
+**Do not read this as "the fixes hurt the model."** Removing a duplicated feature
+and making a dead one informative changed what CatBoost's early stopping sees;
+the mean moved by 0.0026, which is inside the seed-to-seed spread of ±0.006. The
+defensible statement is that the model's measured quality is unchanged within
+noise, and that two of its 23 features were previously contributing nothing.
+
+### Reproducibility, and an environment claim this corrects
+
+§5 said: *"`requirements.txt` pins `numpy<2.1`; I did not test that exact pin."*
+It is tested now. Everything in this section ran in a fresh venv at **numpy
+2.0.2** with causalml 0.16.0, pacmap and numba importable — which also means the
+uplift stage ran through CausalML rather than the silent custom-T-learner
+fallback (`uplift_metrics.pkl` records
+`"T-Learner + S-Learner ensemble (CausalML)"`).
+
+The ambient Anaconda environment on this machine has numpy 2.5, which breaks
+numba and therefore pacmap, so `src/pipeline.py` cannot run there at all — it
+fails at `import pacmap` in stage 2 before reaching the silent causalml fallback.
+
+The whole pipeline and the 5-seed eval were run **twice**, and the second run
+reproduced the first exactly: same segment sizes, same stability ARI, same 7,788
+persuadables, same risk tiers, and the same figures to four decimal places in
+every row of §1.
+
+### Tests
+
+`tests/test_cell2cell_feature_defects.py` (10) and
+`tests/test_reporting_defects.py` (9). **13 of the 19 go red** when the four
+source files are reverted to `48ffe08` with the regenerated artifacts left in
+place — counted by doing exactly that and re-running, not by reasoning about it.
+Suite **98 → 119 passed**, `ruff check .` clean.
+
+Two of them assert the general form rather than the instance, because the
+specific defects are less interesting than their shape:
+
+- `test_churn_features_contain_no_duplicated_column` fails if **any** two
+  features in the churn list hold identical values, under any names. It caught a
+  false positive in its own fixture first — `IncomeGroup` and `UniqueSubs` both
+  cycled mod 3, so `CityTier` and `NumberOfAddress` came out identical on
+  synthetic data while the real data has no such coincidence. The fixture was
+  fixed, not the assertion.
+- `test_no_churn_feature_is_constant` fails if any feature cannot affect a
+  prediction, which is 11a and 11c at once.
+
+And one guards the reverse direction: `test_order_count_is_still_emitted_for_the_dashboard`
+fails if dropping the column from the model also drops it from the data, which
+would silently empty a Supabase field.
