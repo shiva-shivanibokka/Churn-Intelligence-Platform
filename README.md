@@ -2,6 +2,8 @@
 
 > End-to-end decision intelligence platform: behavioral segmentation → per-cohort churn prediction → uplift modeling → 12-tool AI retention agent → closed-loop outcome tracking.
 
+> **Measured evaluation: [`RESULTS.md`](RESULTS.md)** — per-segment churn models **lose to a single global model** on identical test rows in 5 of 5 seeds (ΔAUC −0.0071 to −0.0165, every CI excluding 0) — the opposite of this project's original premise.
+
 ![CI](https://github.com/shiva-shivanibokka/Churn-Intelligence-Platform/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.12-blue)
 ![Docker](https://img.shields.io/badge/docker-build-passing)
