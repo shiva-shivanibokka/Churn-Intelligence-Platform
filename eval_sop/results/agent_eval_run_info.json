@@ -1,0 +1,14 @@
+{
+  "model": "qwen2.5:7b",
+  "endpoint": "ollama local native /api/chat, num_ctx=8192, sequential",
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "temperature": 0.7,
+  "n_customers": 40,
+  "sample": "10 per CustomerType from data/processed/uplift.parquet, pandas sample random_state=0",
+  "runtime_s": 3169.1,
+  "n_infra_errors_excluded": 0
+}

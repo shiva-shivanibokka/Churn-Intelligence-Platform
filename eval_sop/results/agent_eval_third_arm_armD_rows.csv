@@ -1,0 +1,121 @@
+approach,seed,customer_id,customer_type,latency_s,infra_error,llm_calls,max_est_prompt_tokens,valid_json,intervene,ref_intervene,agrees_with_rule,intervened_on_lost_cause_or_sleeping_dog,cites_true_top_shap_driver,cost_exceeds_model_expected_value,model_estimated_net_value_usd,n_tool_calls,called_drivers_tool,called_roi_tool,budget_overflow,playbook_query_matches_top_driver,roi_tool_used_true_uplift
+tool_output_no_calls,0,3397638,Persuadable,21.67274236679077,False,1,1866,True,True,True,True,False,True,False,47.05143582820892,0,False,False,False,False,False
+tool_output_no_calls,0,3221298,Persuadable,7.135159492492676,False,1,1911,True,True,True,True,False,True,True,-34.64832603931427,0,False,False,False,False,False
+tool_output_no_calls,0,3188998,Persuadable,9.606486082077026,False,1,1929,True,True,True,True,False,True,True,-42.7996039390564,0,False,False,False,False,False
+tool_output_no_calls,0,3130402,Persuadable,7.514066457748413,False,1,1897,True,True,True,True,False,True,False,14.04987096786499,0,False,False,False,False,False
+tool_output_no_calls,0,3237486,Persuadable,7.40194034576416,False,1,1913,True,True,True,True,False,True,True,-34.04574543237686,0,False,False,False,False,False
+tool_output_no_calls,0,3229430,Persuadable,7.940973520278931,False,1,1914,True,True,True,True,False,True,True,-44.58637237548828,0,False,False,False,False,False
+tool_output_no_calls,0,3039558,Persuadable,8.31469988822937,False,1,1915,True,True,True,True,False,True,True,-30.12634515762329,0,False,False,False,False,False
+tool_output_no_calls,0,3221970,Persuadable,7.245297193527222,False,1,1928,True,True,True,True,False,True,True,-47.76610881090164,0,False,False,False,False,False
+tool_output_no_calls,0,3093022,Persuadable,6.819353818893433,False,1,1867,True,True,True,True,False,True,False,28.33673220872879,0,False,False,False,False,False
+tool_output_no_calls,0,3258734,Persuadable,6.464653730392456,False,1,1908,True,True,True,True,False,True,False,11.736629605293274,0,False,False,False,False,False
+tool_output_no_calls,0,3096718,Sure Thing,6.916137218475342,False,1,1864,True,True,False,False,False,True,False,23.783965528011322,0,False,False,False,False,False
+tool_output_no_calls,0,3372394,Sure Thing,6.431559085845947,False,1,1883,True,True,False,False,False,True,False,29.540839165449142,0,False,False,False,False,False
+tool_output_no_calls,0,3084910,Sure Thing,7.087102890014648,False,1,1896,True,True,False,False,False,True,False,7.935291230678558,0,False,False,False,False,False
+tool_output_no_calls,0,3003882,Sure Thing,6.4809582233428955,False,1,1891,True,True,False,False,False,True,False,27.49611486494541,0,False,False,False,False,False
+tool_output_no_calls,0,3283914,Sure Thing,7.223090410232544,False,1,1885,True,True,False,False,False,True,False,30.622771501541138,0,False,False,False,False,False
+tool_output_no_calls,0,3314878,Sure Thing,7.460421800613403,False,1,1887,True,True,False,False,False,True,False,13.661047518253326,0,False,False,False,False,False
+tool_output_no_calls,0,3340578,Sure Thing,6.819053649902344,False,1,1865,True,True,False,False,False,True,False,12.324793338775635,0,False,False,False,False,False
+tool_output_no_calls,0,3260294,Sure Thing,6.8645994663238525,False,1,1904,True,True,False,False,False,True,False,21.751595735549927,0,False,False,False,False,False
+tool_output_no_calls,0,3210698,Sure Thing,6.5500874519348145,False,1,1902,True,True,False,False,False,True,False,36.03144225478172,0,False,False,False,False,False
+tool_output_no_calls,0,3347386,Sure Thing,6.805217742919922,False,1,1863,True,True,False,False,False,True,False,19.058836698532104,0,False,False,False,False,False
+tool_output_no_calls,0,3363410,Lost Cause,7.40995454788208,False,1,1914,True,True,False,False,True,True,True,-55.56149482727051,0,False,False,False,False,False
+tool_output_no_calls,0,3309338,Lost Cause,3.8241071701049805,False,1,1941,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,0,3353114,Lost Cause,3.678375482559204,False,1,1924,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,0,3331766,Lost Cause,3.5397582054138184,False,1,1940,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,0,3314550,Lost Cause,7.830129146575928,False,1,1930,True,True,False,False,True,True,True,-54.67689484357834,0,False,False,False,False,False
+tool_output_no_calls,0,3195330,Lost Cause,7.5932981967926025,False,1,1917,True,True,False,False,True,True,True,-59.11836475133896,0,False,False,False,False,False
+tool_output_no_calls,0,3322130,Lost Cause,4.36807656288147,False,1,1941,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,0,3170222,Lost Cause,3.8974215984344482,False,1,1931,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,0,3197038,Lost Cause,7.140247821807861,False,1,1892,True,True,False,False,True,True,True,-55.98582774400711,0,False,False,False,False,False
+tool_output_no_calls,0,3334510,Lost Cause,7.349614858627319,False,1,1927,True,True,False,False,True,True,True,-58.80299657583237,0,False,False,False,False,False
+tool_output_no_calls,0,3042278,Sleeping Dog,4.551856517791748,False,1,1918,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,0,3381546,Sleeping Dog,3.4510629177093506,False,1,1899,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,0,3016650,Sleeping Dog,3.8856685161590576,False,1,1901,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,0,3351114,Sleeping Dog,8.098229885101318,False,1,1889,True,True,False,False,True,True,False,0.8851160109043121,0,False,False,False,False,False
+tool_output_no_calls,0,3097610,Sleeping Dog,7.026413440704346,False,1,1907,True,True,False,False,True,True,False,14.162308096885681,0,False,False,False,False,False
+tool_output_no_calls,0,3303466,Sleeping Dog,3.4612138271331787,False,1,1929,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,0,3305298,Sleeping Dog,4.4904985427856445,False,1,1884,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,0,3275250,Sleeping Dog,7.485321044921875,False,1,1885,True,True,False,False,True,True,False,17.49288898706436,0,False,False,False,False,False
+tool_output_no_calls,0,3366194,Sleeping Dog,4.102979421615601,False,1,1901,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,0,3021406,Sleeping Dog,3.7444779872894287,False,1,1903,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,1,3397638,Persuadable,7.043272972106934,False,1,1866,True,True,True,True,False,True,False,47.05143582820892,0,False,False,False,False,False
+tool_output_no_calls,1,3221298,Persuadable,7.644176006317139,False,1,1911,True,True,True,True,False,True,True,-34.64832603931427,0,False,False,False,False,False
+tool_output_no_calls,1,3188998,Persuadable,7.145497560501099,False,1,1929,True,True,True,True,False,True,True,-42.7996039390564,0,False,False,False,False,False
+tool_output_no_calls,1,3130402,Persuadable,6.249054670333862,False,1,1897,True,True,True,True,False,True,False,14.04987096786499,0,False,False,False,False,False
+tool_output_no_calls,1,3237486,Persuadable,6.685926914215088,False,1,1913,True,True,True,True,False,True,True,-34.04574543237686,0,False,False,False,False,False
+tool_output_no_calls,1,3229430,Persuadable,6.948029279708862,False,1,1914,True,True,True,True,False,True,True,-44.58637237548828,0,False,False,False,False,False
+tool_output_no_calls,1,3039558,Persuadable,6.876915693283081,False,1,1915,True,True,True,True,False,True,True,-30.12634515762329,0,False,False,False,False,False
+tool_output_no_calls,1,3221970,Persuadable,7.2282280921936035,False,1,1928,True,True,True,True,False,True,True,-47.76610881090164,0,False,False,False,False,False
+tool_output_no_calls,1,3093022,Persuadable,7.331438779830933,False,1,1867,True,True,True,True,False,True,False,28.33673220872879,0,False,False,False,False,False
+tool_output_no_calls,1,3258734,Persuadable,6.370188236236572,False,1,1908,True,True,True,True,False,True,False,11.736629605293274,0,False,False,False,False,False
+tool_output_no_calls,1,3096718,Sure Thing,7.037876844406128,False,1,1864,True,True,False,False,False,True,False,23.783965528011322,0,False,False,False,False,False
+tool_output_no_calls,1,3372394,Sure Thing,7.385024785995483,False,1,1883,True,True,False,False,False,True,False,29.540839165449142,0,False,False,False,False,False
+tool_output_no_calls,1,3084910,Sure Thing,6.523173809051514,False,1,1896,True,True,False,False,False,True,False,7.935291230678558,0,False,False,False,False,False
+tool_output_no_calls,1,3003882,Sure Thing,6.576950550079346,False,1,1891,True,True,False,False,False,True,False,27.49611486494541,0,False,False,False,False,False
+tool_output_no_calls,1,3283914,Sure Thing,6.160242557525635,False,1,1885,True,True,False,False,False,True,False,30.622771501541138,0,False,False,False,False,False
+tool_output_no_calls,1,3314878,Sure Thing,6.783695459365845,False,1,1887,True,True,False,False,False,True,False,13.661047518253326,0,False,False,False,False,False
+tool_output_no_calls,1,3340578,Sure Thing,6.868345022201538,False,1,1865,True,True,False,False,False,True,False,12.324793338775635,0,False,False,False,False,False
+tool_output_no_calls,1,3260294,Sure Thing,7.404696702957153,False,1,1904,True,True,False,False,False,True,False,21.751595735549927,0,False,False,False,False,False
+tool_output_no_calls,1,3210698,Sure Thing,6.490318536758423,False,1,1902,True,True,False,False,False,True,False,36.03144225478172,0,False,False,False,False,False
+tool_output_no_calls,1,3347386,Sure Thing,6.659425973892212,False,1,1863,True,True,False,False,False,True,False,19.058836698532104,0,False,False,False,False,False
+tool_output_no_calls,1,3363410,Lost Cause,7.490484237670898,False,1,1914,True,True,False,False,True,True,True,-55.56149482727051,0,False,False,False,False,False
+tool_output_no_calls,1,3309338,Lost Cause,3.420975685119629,False,1,1941,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,1,3353114,Lost Cause,3.7592766284942627,False,1,1924,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,1,3331766,Lost Cause,3.6142520904541016,False,1,1940,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,1,3314550,Lost Cause,7.086145401000977,False,1,1930,True,True,False,False,True,True,True,-54.67689484357834,0,False,False,False,False,False
+tool_output_no_calls,1,3195330,Lost Cause,7.756746053695679,False,1,1917,True,True,False,False,True,True,True,-59.11836475133896,0,False,False,False,False,False
+tool_output_no_calls,1,3322130,Lost Cause,3.365217924118042,False,1,1941,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,1,3170222,Lost Cause,3.7756717205047607,False,1,1931,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,1,3197038,Lost Cause,6.136712312698364,False,1,1892,True,True,False,False,True,True,True,-55.98582774400711,0,False,False,False,False,False
+tool_output_no_calls,1,3334510,Lost Cause,8.77086591720581,False,1,1927,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,1,3042278,Sleeping Dog,3.3231921195983887,False,1,1918,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,1,3381546,Sleeping Dog,3.783905506134033,False,1,1899,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,1,3016650,Sleeping Dog,3.499131917953491,False,1,1901,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,1,3351114,Sleeping Dog,6.6613380908966064,False,1,1889,True,True,False,False,True,True,False,0.8851160109043121,0,False,False,False,False,False
+tool_output_no_calls,1,3097610,Sleeping Dog,6.5323567390441895,False,1,1907,True,True,False,False,True,True,False,14.162308096885681,0,False,False,False,False,False
+tool_output_no_calls,1,3303466,Sleeping Dog,3.025857925415039,False,1,1929,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,1,3305298,Sleeping Dog,3.932866096496582,False,1,1884,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,1,3275250,Sleeping Dog,6.829441785812378,False,1,1885,True,True,False,False,True,True,False,17.49288898706436,0,False,False,False,False,False
+tool_output_no_calls,1,3366194,Sleeping Dog,2.865797758102417,False,1,1901,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,1,3021406,Sleeping Dog,3.6595327854156494,False,1,1903,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,2,3397638,Persuadable,8.07333755493164,False,1,1866,True,True,True,True,False,True,False,47.05143582820892,0,False,False,False,False,False
+tool_output_no_calls,2,3221298,Persuadable,7.23247218132019,False,1,1911,True,True,True,True,False,True,True,-34.64832603931427,0,False,False,False,False,False
+tool_output_no_calls,2,3188998,Persuadable,7.911561489105225,False,1,1929,True,True,True,True,False,True,True,-42.7996039390564,0,False,False,False,False,False
+tool_output_no_calls,2,3130402,Persuadable,7.16586971282959,False,1,1897,True,True,True,True,False,True,False,14.04987096786499,0,False,False,False,False,False
+tool_output_no_calls,2,3237486,Persuadable,7.688549518585205,False,1,1913,True,True,True,True,False,True,True,-34.04574543237686,0,False,False,False,False,False
+tool_output_no_calls,2,3229430,Persuadable,8.483985185623169,False,1,1914,True,True,True,True,False,True,True,-44.58637237548828,0,False,False,False,False,False
+tool_output_no_calls,2,3039558,Persuadable,6.294960021972656,False,1,1915,True,True,True,True,False,True,True,-30.12634515762329,0,False,False,False,False,False
+tool_output_no_calls,2,3221970,Persuadable,7.659640550613403,False,1,1928,True,True,True,True,False,True,True,-47.76610881090164,0,False,False,False,False,False
+tool_output_no_calls,2,3093022,Persuadable,7.35868501663208,False,1,1867,True,True,True,True,False,True,False,28.33673220872879,0,False,False,False,False,False
+tool_output_no_calls,2,3258734,Persuadable,7.553837299346924,False,1,1908,True,True,True,True,False,True,False,11.736629605293274,0,False,False,False,False,False
+tool_output_no_calls,2,3096718,Sure Thing,7.8110878467559814,False,1,1864,True,True,False,False,False,True,False,23.783965528011322,0,False,False,False,False,False
+tool_output_no_calls,2,3372394,Sure Thing,7.635740756988525,False,1,1883,True,True,False,False,False,True,False,29.540839165449142,0,False,False,False,False,False
+tool_output_no_calls,2,3084910,Sure Thing,6.895976781845093,False,1,1896,True,True,False,False,False,True,False,7.935291230678558,0,False,False,False,False,False
+tool_output_no_calls,2,3003882,Sure Thing,6.589997291564941,False,1,1891,True,True,False,False,False,True,False,27.49611486494541,0,False,False,False,False,False
+tool_output_no_calls,2,3283914,Sure Thing,7.708547115325928,False,1,1885,True,True,False,False,False,True,False,30.622771501541138,0,False,False,False,False,False
+tool_output_no_calls,2,3314878,Sure Thing,7.728044033050537,False,1,1887,True,True,False,False,False,True,False,13.661047518253326,0,False,False,False,False,False
+tool_output_no_calls,2,3340578,Sure Thing,7.479995250701904,False,1,1865,True,True,False,False,False,True,False,12.324793338775635,0,False,False,False,False,False
+tool_output_no_calls,2,3260294,Sure Thing,6.516042232513428,False,1,1904,True,True,False,False,False,True,False,21.751595735549927,0,False,False,False,False,False
+tool_output_no_calls,2,3210698,Sure Thing,7.293141841888428,False,1,1902,True,True,False,False,False,True,False,36.03144225478172,0,False,False,False,False,False
+tool_output_no_calls,2,3347386,Sure Thing,7.680274724960327,False,1,1863,True,True,False,False,False,True,False,19.058836698532104,0,False,False,False,False,False
+tool_output_no_calls,2,3363410,Lost Cause,7.9400293827056885,False,1,1914,True,True,False,False,True,True,True,-55.56149482727051,0,False,False,False,False,False
+tool_output_no_calls,2,3309338,Lost Cause,3.7802066802978516,False,1,1941,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,2,3353114,Lost Cause,3.09358286857605,False,1,1924,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,2,3331766,Lost Cause,2.859761953353882,False,1,1940,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,2,3314550,Lost Cause,7.863569259643555,False,1,1930,True,True,False,False,True,True,True,-54.67689484357834,0,False,False,False,False,False
+tool_output_no_calls,2,3195330,Lost Cause,7.79167103767395,False,1,1917,True,True,False,False,True,True,True,-59.11836475133896,0,False,False,False,False,False
+tool_output_no_calls,2,3322130,Lost Cause,2.974159002304077,False,1,1941,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,2,3170222,Lost Cause,3.2468950748443604,False,1,1931,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,2,3197038,Lost Cause,7.070329666137695,False,1,1892,True,True,False,False,True,True,True,-55.98582774400711,0,False,False,False,False,False
+tool_output_no_calls,2,3334510,Lost Cause,7.127496719360352,False,1,1927,True,True,False,False,True,True,True,-58.80299657583237,0,False,False,False,False,False
+tool_output_no_calls,2,3042278,Sleeping Dog,3.2721903324127197,False,1,1918,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,2,3381546,Sleeping Dog,2.8603060245513916,False,1,1899,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,2,3016650,Sleeping Dog,3.888852596282959,False,1,1901,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,2,3351114,Sleeping Dog,7.377892255783081,False,1,1889,True,True,False,False,True,True,False,0.8851160109043121,0,False,False,False,False,False
+tool_output_no_calls,2,3097610,Sleeping Dog,7.4229576587677,False,1,1907,True,True,False,False,True,True,False,14.162308096885681,0,False,False,False,False,False
+tool_output_no_calls,2,3303466,Sleeping Dog,4.243127346038818,False,1,1929,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,2,3305298,Sleeping Dog,3.1424107551574707,False,1,1884,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,2,3275250,Sleeping Dog,7.666126012802124,False,1,1885,True,True,False,False,True,True,False,17.49288898706436,0,False,False,False,False,False
+tool_output_no_calls,2,3366194,Sleeping Dog,3.1078336238861084,False,1,1901,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False
+tool_output_no_calls,2,3021406,Sleeping Dog,3.869887351989746,False,1,1903,True,False,False,True,False,False,False,0.0,0,False,False,False,False,False

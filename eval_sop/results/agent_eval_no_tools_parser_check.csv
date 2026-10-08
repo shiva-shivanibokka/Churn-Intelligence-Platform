@@ -1,0 +1,867 @@
+seed,customer_id,customer_type,valid_project_parser,valid_lenient_parser,raw
+0,3397638,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer is lapsed, indicating recent inactivity which may lead to churn."",
+  ""customer_receptivity"": ""High, as the customer is still within the persuadable segment and has a slight positive uplift score, suggesting they can be motivated to return."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Hello, this is [Your Company] and I hope you’re doing well! I noticed you haven’t used our service recently, and I wanted to check in and see how we can help you get back on track. We have some great updates and offers that might interest you."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The proactive call aims to re-engage the customer and understand their needs to retain their business."",
+  ""confidence"": ""Medium""
+}"
+0,3221298,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer is at risk due to low engagement levels and slightly negative uplift score."",
+  ""customer_receptivity"": ""High, as the customer is persuadable and has shown potential for positive response."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Hello, I noticed you've been with us for a while and wanted to check in to see how our services are working for you. Could I help with anything specific today?"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The customer is likely to feel valued and may address any issues, potentially improving engagement and reducing churn."",
+  ""confidence"": ""High""
+}"
+0,3188998,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer is price sensitive, indicating a high risk of switching to a cheaper alternative."",
+  ""customer_receptivity"": ""High, as the uplift score is positive and the churn probability is significant, suggesting the customer is receptive to value-based interventions."",
+  ""intervention_type"": ""Discount Offer"",
+  ""channel"": ""Email"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""We noticed you're looking for the best value. To keep you happy, we're offering a special discount on our premium services. Don't miss out!"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""Reduction in churn risk by offering a value-based incentive, potentially retaining the customer and boosting their satisfaction."",
+  ""confidence"": ""High""
+}"
+0,3130402,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer is lapsed, indicating a temporary loss of engagement."",
+  ""customer_receptivity"": ""High, as the customer is 'Persuadable' and has shown some interest in the product."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Hi, I noticed you haven't used our service recently. We value your business and want to make sure everything is working well for you. Can we chat to see if there’s anything we can help with?"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""This proactive call could reignite the customer's interest and re-engage them in the service."",
+  ""confidence"": ""High""
+}"
+0,3237486,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer is at risk due to moderate churn probability and slight negative uplift score."",
+  ""customer_receptivity"": ""High, as the customer is identified as 'Persuadable' and has a moderate churn risk."",
+  ""intervention_type"": ""Discount Offer"",
+  ""channel"": ""Email"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""We noticed you haven't used our service recently. To keep you happy, we're offering a special discount on our premium features. Upgrade now and get 20% off for the next 30 days. Don't miss out!"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""Expected to reduce churn by re-engaging the customer with a targeted offer."",
+  ""confidence"": ""Medium""
+}"
+0,3229430,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer is at risk due to moderate churn probability and slightly positive uplift score, indicating they are sensitive to value propositions."",
+  ""customer_receptivity"": ""High, as they are 'Persuadable' and show potential for churn."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you haven't used our service in a while and wanted to share some exclusive content to keep you engaged. Stay connected!"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""Increased user engagement and reduced churn likelihood by addressing their needs and offering relevant content."",
+  ""confidence"": ""High""
+}"
+0,3039558,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer is lapsed, indicating a recent loss of engagement or value."",
+  ""customer_receptivity"": ""High, as the customer is 'Persuadable' and has a moderate churn probability."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you haven't used our service recently. Our team would love to chat and see how we can help you get back on track. No pressure, just a quick call to ensure you're getting the most out of our platform."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""This call aims to re-engage the customer and uncover any issues that might be preventing them from using the service."",
+  ""confidence"": ""High""
+}"
+0,3221970,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer is price sensitive, indicating a higher sensitivity to pricing changes or discounts."",
+  ""customer_receptivity"": ""High, as the customer is price sensitive and the uplift score is positive, suggesting they are open to engaging with an intervention."",
+  ""intervention_type"": ""Discount Offer"",
+  ""channel"": ""Email"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""Dear [Customer Name], we noticed you've been with us for a while and wanted to express our appreciation. As a token of our gratitude, we're offering you a special discount on your next purchase. This is just our way of saying thank you for your continued support. Best, [Your Company Name]"",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""This offer is expected to increase the perceived value of staying with us, potentially reducing churn."",
+  ""confidence"": ""High""
+}"
+0,3093022,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer is lapsed, indicating a temporary decrease in engagement but not yet fully churned."",
+  ""customer_receptivity"": ""High, as the customer is considered 'persuadable' and has a relatively high uplift score indicating they are open to re-engagement."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Hi [Customer Name], I noticed you haven't used our service recently. We value your business and would love to hear how we can better support you. How can we assist you today?"",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""The customer is likely to be re-engaged through personalized support, potentially increasing their usage and decreasing the risk of churn."",
+  ""confidence"": ""High""
+}"
+0,3258734,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Potential loss of a loyal customer who is marginally dissatisfied."",
+  ""customer_receptivity"": ""High, as the customer is 'Persuadable' and there is a slight negative sentiment detected."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""We noticed you've been with us for a while! Here are some personalized tips and new features we think you might enjoy. Let us know what you think!"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""Increased engagement and satisfaction, potentially reducing churn."",
+  ""confidence"": ""Medium""
+}"
+0,3096718,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer is lapsed, indicating a recent lack of activity which may be temporary."",
+  ""customer_receptivity"": ""High, as the customer type is 'Sure Thing' and has a positive uplift score, suggesting they are responsive to engagement."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you haven't used our service recently. How can we help you get back to it? Our team is here to ensure you have everything you need to enjoy your experience."",
+  ""intervention_cost_estimate"": ""Medium ($10-25)"",
+  ""expected_outcome"": ""Expected to see a high engagement rate, potentially leading to increased usage and a positive impact on CLV."",
+  ""confidence"": ""High""
+}"
+0,3372394,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer has a high sensitivity to pricing, but is currently not at risk of churn."",
+  ""customer_receptivity"": ""High, as the uplift score is positive, indicating a potential for increased value perception."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Unlock exclusive discounts and early access to new features. We value your feedback and want to ensure you stay ahead with the latest improvements."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The personalized content is likely to increase engagement and perceived value, leading to higher customer satisfaction and retention."",
+  ""confidence"": ""High""
+}"
+0,3084910,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer is lapsed, indicating a recent lack of activity but has a low churn probability."",
+  ""customer_receptivity"": ""High, as the customer has shown interest in the product before and has a low churn risk."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Hi [Customer Name], we noticed you haven't used our service recently. I wanted to check in and see if there's anything we can help you with or if there are new features you're interested in. Let's keep you on board with our best offers and services."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""This proactive call can reignite customer engagement and prevent lapsed activity from becoming a long-term issue."",
+  ""confidence"": ""High""
+}"
+0,3003882,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Potential for increased competition or internal satisfaction issues might slightly increase churn risk."",
+  ""customer_receptivity"": ""High, as they are a 'Sure Thing' and have a relatively low churn probability. They are likely very satisfied and only slightly at risk."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""We've noticed you're really into our app and wanted to share some new features that might excite you even more! Let's keep making the most of it together."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""High retention rate as the customer is already highly satisfied and the personalized content might remind them of the value they get from the service."",
+  ""confidence"": ""High""
+}"
+0,3283914,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer is price sensitive and may be considering switching to a cheaper alternative."",
+  ""customer_receptivity"": ""High, as the customer is sensitive to pricing and might be evaluating other options."",
+  ""intervention_type"": ""Discount Offer"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you're evaluating our service. To show our commitment, we're offering a 10% discount for the next three months. Don’t miss out!"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The customer is likely to remain with us, valuing the ongoing savings."",
+  ""confidence"": ""High""
+}"
+0,3314878,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer is price sensitive and may be considering alternative lower-cost options."",
+  ""customer_receptivity"": ""High, as the customer is not yet highly likely to churn but remains sensitive to pricing."",
+  ""intervention_type"": ""Loyalty Reward"",
+  ""channel"": ""Email"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""Enjoy exclusive savings on your next purchase with us. As a valued customer, we want to show our appreciation by offering you a 10% discount on your next order."",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""Loyalty reward is likely to strengthen the customer's relationship with the company and reduce churn risk."",
+  ""confidence"": ""Medium""
+}"
+0,3340578,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer is at risk due to low engagement, indicated by the uplift score of +0.060."",
+  ""customer_receptivity"": ""High, as the uplift score is positive, suggesting the customer is likely open to continued engagement."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you haven't used our service recently. We value your business and are here to assist you with any questions or concerns. Let's discuss how we can help you get the most out of our service."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The proactive support call is expected to reignite the customer's interest and improve their engagement with the service."",
+  ""confidence"": ""High""
+}"
+0,3260294,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Potential for increased competition or internal dissatisfaction driving minor churn risk."",
+  ""customer_receptivity"": ""High, as the customer is a 'Sure Thing' and shows slight room for improvement."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We’ve noticed you’re really into our service, and we want to keep you happy! Here are some exclusive tips and tricks we think you’d love."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""Engagement with content will likely strengthen the customer's loyalty further."",
+  ""confidence"": ""High""
+}"
+0,3210698,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer is at risk due to occasional usage and potential dissatisfaction."",
+  ""customer_receptivity"": ""High, as the uplift score is positive, indicating a potential responsive customer."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""Hello! We noticed you haven't used our service in a while and wanted to check in. How can we assist you better today? Let’s make sure you’re getting the most out of our platform."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""Increased engagement and satisfaction, potentially reducing churn."",
+  ""confidence"": ""High""
+}"
+0,3347386,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer is at risk due to moderate churn probability but shows slight positive uplift."",
+  ""customer_receptivity"": ""High, as the customer has shown slight interest in the service, indicating they might be willing to engage with a personalized approach."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Hey [Customer Name], we noticed you’ve been using our service a bit less lately. To keep you on board, we have some exclusive content and tips tailored just for you. Dive in and let us know what you think!"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""Increased engagement and positive sentiment, potentially reducing churn."",
+  ""confidence"": ""High""
+}"
+0,3363410,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is classified as 'Lost Cause', any intervention is likely to be counterproductive as the customer is unlikely to be retained regardless of the effort put in. The high churn probability and low uplift score further indicate that the customer's decision to churn is already set in stone, making interventions such as discounts or personalized content ineffective. Focusing on high-value customers or those with higher retention potential would be more beneficial.""
+}"
+0,3309338,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the 'Lost Cause' status, the customer has shown little to no interest in the product despite the high CLV, making additional interventions unlikely to result in a positive outcome.""
+}"
+0,3353114,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is classified as 'Lost Cause', any intervention is likely to be counterproductive as the customer is unlikely to be retained regardless of the effort put in. The low churn probability and minimal uplift score indicate that this customer is not responsive to typical retention strategies and might not see value in maintaining the relationship.""
+}"
+0,3331766,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the 'Lost Cause' status, the customer is unlikely to respond positively to any intervention, making it counterproductive to attempt to retain them.""
+}"
+0,3314550,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the 'Lost Cause' status, the customer has shown little to no interest in the product despite price sensitivity, making any intervention likely counterproductive.""
+}"
+0,3195330,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is classified as 'Lost Cause', any intervention is likely to be counterproductive as the customer is unlikely to be retained regardless of the effort put in. The low churn probability and minimal uplift score indicate that the customer is not responsive to typical retention strategies and might have already made up their mind to churn.""
+}"
+0,3322130,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is classified as 'Lost Cause', further interventions are unlikely to change their behavior. The customer is already price sensitive and the predicted uplift from a discount is minimal, making any cost of intervention outweigh potential benefits.""
+}"
+0,3170222,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is classified as 'Lost Cause', any intervention is likely to be counterproductive as the customer is unlikely to be retained regardless of the effort put in. The low churn probability and minimal uplift score indicate that this customer is not responsive to typical retention strategies and thus, further attempts would likely be wasted resources.""
+}"
+0,3197038,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention would likely be counterproductive as this customer is classified as a 'Lost Cause' and is not receptive to further engagement.""
+}"
+0,3334510,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the 'Lost Cause' status, the customer has shown little to no interest in the product despite multiple interventions. Attempting another intervention would likely be counterproductive as it may further strain resources without a significant return.""
+}"
+0,3042278,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention is unlikely to be effective given the 'Sleeping Dog' customer type. This customer has low engagement and is not showing signs of interest in the product despite having a high CLV. Attempting to re-engage might be counterproductive and could lead to unnecessary costs.""
+}"
+0,3381546,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention is unlikely to change behavior of a 'Sleeping Dog' customer who is not actively using the service. Additional engagement is needed to reactivate the customer before considering interventions.""
+}"
+0,3016650,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention is unlikely to be effective given the 'Sleeping Dog' customer type. This customer has shown little recent activity and may not respond positively to incentives or changes in service.""
+}"
+0,3351114,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Given the 'Sleeping Dog' customer type, the customer is currently inactive and may not respond positively to any intervention. Re-engaging a 'Sleeping Dog' typically requires a significant effort and may not yield the expected outcomes, making it counterproductive to invest resources.""
+}"
+0,3097610,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention is unlikely to be effective given the 'Sleeping Dog' customer type. This customer has shown little recent activity and may not respond positively to an intervention.""
+}"
+0,3303466,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention is unlikely to be effective as the customer is classified as a 'Sleeping Dog', indicating low potential for churn and minimal engagement, making it counterproductive to invest resources.""
+}"
+0,3305298,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention is unlikely to be effective as the customer is classified as a 'Sleeping Dog', indicating low potential for churn and minimal engagement, making it counterproductive to invest resources.""
+}"
+0,3275250,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Since the customer is classified as 'Sleeping Dog', they are not actively using the service and any intervention is likely to be counterproductive as they might not see value in the product despite the price sensitivity.""
+}"
+0,3366194,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Since the customer is classified as 'Sleeping Dog', they are unlikely to react to any intervention and may be better off focusing on more active customers.""
+}"
+0,3021406,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention is unlikely to be effective given the 'Sleeping Dog' customer type. This customer has shown little recent activity and may not respond to typical retention strategies.""
+}"
+1,3397638,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Lack of recent engagement has reduced customer satisfaction, indicated by a slight uplift score."",
+  ""customer_receptivity"": ""High, as the customer is classified as 'Persuadable'. They are open to engaging with the service again."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""Hello! We noticed you haven't logged in recently and wanted to check in to see how we can assist you better. Let's chat and ensure your experience with us is top-notch."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The proactive call is expected to re-engage the customer, increasing their likelihood of continued usage and satisfaction."",
+  ""confidence"": ""High""
+}"
+1,3221298,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer has shown slight interest in competing offers but not enough to fully engage."",
+  ""customer_receptivity"": ""High, as the uplift score is positive, indicating they are open to engagement."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you’ve been looking at some of our new features and wondered if there’s anything we can help you with. We’re here to ensure you get the most out of your experience with us."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""Increased engagement and potentially a higher CLV due to personalized support."",
+  ""confidence"": ""High""
+}"
+1,3188998,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""The customer is price-sensitive, which indicates they are more likely to switch to a competitor due to cost concerns."",
+  ""customer_receptivity"": ""High, as the uplift score is positive and the customer is price-sensitive, meaning they might respond well to a discount offer."",
+  ""intervention_type"": ""Discount Offer"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Enjoy a special discount on our premium features! We value your business and want to keep you with us. Don't miss out on the offer."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The customer is likely to respond positively to the discount offer and continue their subscription, reducing churn."",
+  ""confidence"": ""High""
+}"
+1,3130402,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""The customer has a low uplift score, indicating limited engagement and potential disinterest in the product."",
+  ""customer_receptivity"": ""Moderate, as the customer is persuadable and not a lost cause."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you haven't been using our app as much lately. Here are some personalized tips and new features to help you get the most out of your experience!"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The personalized content may re-engage the customer and increase their usage, reducing the churn risk."",
+  ""confidence"": ""Medium""
+}"
+1,3237486,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer has shown slight interest in competing offers but not enough to fully engage."",
+  ""customer_receptivity"": ""High, as the uplift score is positive, indicating potential for positive response to intervention."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Hey there! We noticed you've been thinking about switching. Here are some exclusive offers just for you. Let us know if you have any questions or if you'd like to stay with us. Thanks for being a valued customer!"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The personalized content is likely to increase customer engagement and reduce churn by highlighting exclusive benefits."",
+  ""confidence"": ""High""
+}"
+1,3229430,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer has shown slight interest in competing offers but not enough to drive significant churn probability."",
+  ""customer_receptivity"": ""High, as the customer is 'Persuadable' and has shown interest in competitive offers, indicating they are not fully committed."",
+  ""intervention_type"": ""Discount Offer"",
+  ""channel"": ""Email"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""We noticed you're considering other options. To keep you happy, we’re offering a 10% discount on your next purchase. Let’s make sure you stay with us!"",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""The customer is likely to respond positively to the discount and renew their subscription."",
+  ""confidence"": ""High""
+}"
+1,3039558,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Lack of recent engagement has lowered perceived value, though the customer is still somewhat interested in the product."",
+  ""customer_receptivity"": ""High, as the customer is still engaged enough to show a slight uplift score, indicating potential for persuasion."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Hi [Customer Name], we noticed you haven't logged in recently and wanted to check in to see how our services are working for you. We'd love to chat and ensure everything is meeting your needs. How's everything going?"",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""The call is expected to re-engage the customer and potentially uncover any issues or needs that can be addressed to retain them."",
+  ""confidence"": ""High""
+}"
+1,3221970,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer is price sensitive and may consider switching to a cheaper alternative."",
+  ""customer_receptivity"": ""High, as the customer is considered persuadable and has a slight positive uplift score, indicating they might respond favorably to an offer."",
+  ""intervention_type"": ""Discount Offer"",
+  ""channel"": ""Email"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""We noticed you're considering other options. To keep you with us, we're offering a 10% discount on your next purchase. Let's stay connected and continue to provide you with the best service."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The customer is likely to appreciate the discount and see it as a value proposition, potentially reducing churn."",
+  ""confidence"": ""High""
+}"
+1,3093022,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""The customer has a low uplift score, indicating limited engagement and potential disinterest in the service."",
+  ""customer_receptivity"": ""Moderate, as the customer is persuadable and not a lost cause."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""We've noticed you haven't used our service recently. To make sure you're getting the most out of it, we've put together a few tips and tricks. Check them out in-app now!"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The personalized content may re-engage the customer and remind them of the benefits of the service, reducing the churn probability."",
+  ""confidence"": ""Medium""
+}"
+1,3258734,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Loyal customers with a 34.9% churn probability are at risk of attrition, despite their current satisfaction."",
+  ""customer_receptivity"": ""High, as the customer type is 'Persuadable', indicating they can be influenced with the right intervention."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you've been with us for a while and wanted to check in to see how we can continue to support you. Let’s discuss any new needs or ways to enhance your experience."",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""The proactive call will help retain the customer by addressing any potential issues and reinforcing the customer's loyalty."",
+  ""confidence"": ""High""
+}"
+1,3096718,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""The customer has a low uplift score, indicating a minimal chance of churn despite a moderate probability."",
+  ""customer_receptivity"": ""High, as the customer is a 'Sure Thing' and has a low churn risk, making intervention likely effective."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Hello! I noticed you haven't used our service recently. We're here to help and ensure you get the most out of your experience. How can I assist you today?"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The proactive call is expected to reinforce the customer's relationship and maintain their engagement."",
+  ""confidence"": ""High""
+}"
+1,3372394,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""The customer is price-sensitive, which could lead to churn if competitors offer better pricing."",
+  ""customer_receptivity"": ""High, as the customer is likely to be sensitive to pricing and discounts."",
+  ""intervention_type"": ""Discount Offer"",
+  ""channel"": ""Email"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""We value your business and want to ensure you're getting the best deal. As a valued customer, we're offering you a 10% discount on your next purchase. This offer is exclusive to you, so don't miss out!"",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""The customer is likely to appreciate the discount offer and continue their subscription or purchase, reducing the risk of churn."",
+  ""confidence"": ""High""
+}"
+1,3084910,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Low churn probability and uplift score indicate the customer might be dormant but not actively looking to leave."",
+  ""customer_receptivity"": ""High, as the customer is a 'Sure Thing' and likely to respond well to a gentle nudge."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""Hi there! We noticed you haven't used our service recently. We wanted to check in and see if there's anything we can do to make your experience better. Looking forward to hearing from you!"",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""The customer is likely to express interest in using the service again, leading to a higher chance of retention."",
+  ""confidence"": ""High""
+}"
+1,3003882,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Moderate churn probability suggests potential customer satisfaction issues despite high CLV."",
+  ""customer_receptivity"": ""High, as the customer is a 'Sure Thing' and has a low churn probability, indicating they are satisfied but not fully engaged."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you've been using our service a lot recently! Here are some new features we think you'll love. Let us know what you think!"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""Engagement with new features could reinforce satisfaction and reduce churn risk."",
+  ""confidence"": ""High""
+}"
+1,3283914,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer is price sensitive, indicating potential hesitation in future payments."",
+  ""customer_receptivity"": ""High, as the uplift score is positive, suggesting the customer is open to value-added content."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Discover exclusive content and tips tailored just for you. Enjoy personalized offers and updates that fit your needs perfectly."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The customer will engage with the personalized content, reinforcing their value perception and reducing churn risk."",
+  ""confidence"": ""High""
+}"
+1,3314878,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer is price sensitive, indicating potential for churn due to cost concerns."",
+  ""customer_receptivity"": ""High, as the uplift score is positive, suggesting the customer is open to value-adding interventions."",
+  ""intervention_type"": ""Discount Offer"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you're using our service actively and wanted to offer you a special discount to show our appreciation. This could help reduce any cost concerns and keep you on board."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The customer is likely to accept the offer, leading to an increase in customer satisfaction and retention."",
+  ""confidence"": ""High""
+}"
+1,3340578,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer has shown slight interest in alternative solutions based on their interaction patterns."",
+  ""customer_receptivity"": ""High, as the customer has shown interest but has not yet churned, indicating a willingness to engage."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Hi [Customer Name], I noticed you’ve been using our service less recently. We care about your experience and wanted to ensure everything is working well for you. How can we support you better?"",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""The proactive call is expected to re-engage the customer and remind them of the value our service provides."",
+  ""confidence"": ""High""
+}"
+1,3260294,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer has a slightly higher than average churn probability due to potential latent dissatisfaction."",
+  ""customer_receptivity"": ""High, as the customer is a 'Sure Thing' and likely engaged with the service."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Hi there! Just checking in to see how you’re enjoying our service. We value your loyalty and want to make sure everything is running smoothly. Let me know if there’s anything we can help with."",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""The proactive call is expected to reinforce the customer's positive experience and reduce the chance of churn."",
+  ""confidence"": ""High""
+}"
+1,3210698,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer has shown slight interest in upgrading but has not done so yet."",
+  ""customer_receptivity"": ""High, as the customer is open to a premium upgrade and has a positive uplift score."",
+  ""intervention_type"": ""Premium Upgrade"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you've been using our premium features, and we think you'll love our latest upgrades even more. Upgrade now and get exclusive content and support."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The customer is likely to upgrade, increasing their lifetime value and retaining them for a longer period."",
+  ""confidence"": ""High""
+}"
+1,3347386,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer has shown slight interest in product but hasn't utilized advanced features."",
+  ""customer_receptivity"": ""High, as the customer is showing interest and has not yet churned."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""Hey [Customer Name], we noticed you've been using our basic features. We think you might find our advanced tools really helpful for [specific use case]. Let us know if you need any help getting started! 🚀"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""Increased engagement with advanced features, potentially boosting customer satisfaction and retention."",
+  ""confidence"": ""High""
+}"
+1,3363410,Lost Cause,True,True,"{
+  ""primary_risk_reason"": ""Customer has shown minimal engagement and high churn probability despite a small uplift score."",
+  ""customer_receptivity"": ""Low, as the customer is classified as 'Lost Cause', indicating they are unlikely to respond positively to intervention."",
+  ""intervention_type"": ""Do not intervene"",
+  ""channel"": ""N/A"",
+  ""timing"": ""N/A"",
+  ""message_framing"": ""N/A"",
+  ""intervention_cost_estimate"": ""N/A"",
+  ""expected_outcome"": ""Unlikely to change customer's behavior given their current classification."",
+  ""confidence"": ""High"",
+  ""do_not_intervene_reason"": ""Intervention would be counterproductive as the customer is classified as 'Lost Cause', indicating a low likelihood of response and poor ROI.""
+}"
+1,3309338,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is categorized as 'Lost Cause', further interventions are likely to be counterproductive as they have shown no interest in the product despite price sensitivity.""
+}"
+1,3353114,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the 'Lost Cause' customer type, any intervention is likely to be counterproductive as this customer is unlikely to respond positively to any form of engagement.""
+}"
+1,3331766,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is categorized as 'Lost Cause', any intervention is unlikely to change their decision to churn. Additionally, the uplift score is minimal, indicating that even if they were to respond, the value generated from retaining them would not outweigh the cost of intervention.""
+}"
+1,3314550,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is categorized as 'Lost Cause', further interventions are likely to be counterproductive as the customer is unlikely to respond positively to any retention efforts.""
+}"
+1,3195330,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the 'Lost Cause' customer type, any intervention is likely to be counterproductive as this customer has shown no interest or engagement with the service despite multiple opportunities.""
+}"
+1,3322130,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is categorized as 'Lost Cause', further interventions are likely to be counterproductive as the customer is unlikely to respond positively to any of the proposed actions.""
+}"
+1,3170222,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the 'Lost Cause' customer type, any intervention is likely to be counterproductive as this customer has shown no interest or engagement with the service despite being at risk of churn. Their low uplift score also suggests that they are unlikely to respond positively to any form of intervention.""
+}"
+1,3197038,Lost Cause,True,True,"{
+  ""primary_risk_reason"": ""Loyal customer with a slight dip in engagement and value, potentially due to external factors."",
+  ""customer_receptivity"": ""Low, as the customer is classified as a 'Lost Cause'. They may not respond positively to interventions."",
+  ""intervention_type"": ""Not applicable"",
+  ""channel"": ""Not applicable"",
+  ""timing"": ""Not applicable"",
+  ""message_framing"": ""Not applicable"",
+  ""intervention_cost_estimate"": ""Not applicable"",
+  ""expected_outcome"": ""Unlikely to see a significant change in behavior given the 'Lost Cause' designation."",
+  ""confidence"": ""Low"",
+  ""do_not_intervene_reason"": ""Interventions are unlikely to be effective given the 'Lost Cause' designation, as this customer has shown little potential for recovery.""
+}"
+1,3334510,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is categorized as 'Lost Cause', further interventions are likely to be counterproductive as the customer is unlikely to respond positively to any retention efforts.""
+}"
+1,3042278,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention would likely be counterproductive given the customer is classified as a 'Sleeping Dog', indicating low potential for engagement and minimal churn risk.""
+}"
+1,3381546,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention would likely be counterproductive given that the customer is classified as a 'Sleeping Dog'. They are not actively using the service and may not respond positively to an intervention, which could potentially disrupt their inactive state.""
+}"
+1,3016650,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention would likely be counterproductive given that the customer is classified as a 'Sleeping Dog', indicating they are currently satisfied but not actively using the service. Reactivating such customers may not yield significant value within the given timeframe.""
+}"
+1,3351114,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is a 'Sleeping Dog', there is little likelihood of reactivation, making intervention counterproductive.""
+}"
+1,3097610,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention would likely be counterproductive given that the customer is classified as a 'Sleeping Dog'. These customers are not actively engaged and do not show interest in the product, making targeted interventions unlikely to have a positive impact.""
+}"
+1,3303466,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention would likely be counterproductive as the customer is classified as a 'Sleeping Dog' and has a low churn probability. Reactivating such a customer might not yield significant returns given their current inactivity.""
+}"
+1,3305298,Sleeping Dog,True,True,"{
+  ""primary_risk_reason"": ""The customer has a low engagement with the product recently."",
+  ""customer_receptivity"": ""Low, as the customer is a 'Sleeping Dog' and may not be responsive to interventions."",
+  ""intervention_type"": ""Reactivation Campaign"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you haven't used our service recently. We miss you and want to help you get back to using it. Check out our latest features and offers!"",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""The campaign may not significantly impact churn given the customer's current status, but it's worth a gentle nudge."",
+  ""confidence"": ""Medium""
+}"
+1,3275250,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Since the customer is categorized as a 'Sleeping Dog', intervention would likely be counterproductive as they are not actively using the product and any additional push might further reduce their engagement.""
+}"
+1,3366194,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Since the customer is categorized as a 'Sleeping Dog', they are currently not using the service and an intervention might be counterproductive. Reactivating such customers requires significant effort and there is no guarantee of successful re-engagement given their current state.""
+}"
+1,3021406,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention would likely be counterproductive given the customer is classified as a 'Sleeping Dog'. These customers are not actively using the service and are unlikely to respond positively to additional incentives, making the cost outweigh the potential benefit.""
+}"
+2,3397638,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""The customer has a moderate churn probability and a slight positive uplift score, indicating they are still open to being persuaded to continue using the service."",
+  ""customer_receptivity"": ""High, as the customer is categorized as 'Persuadable' and has a moderate likelihood of churn, meaning they are not yet a lost cause."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We've noticed you haven't logged in recently, and we wanted to check in to see how we can assist you better. Let's chat and make sure you're getting the most out of our service!"",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""The proactive support call is expected to re-engage the customer and increase their satisfaction, thereby reducing the risk of churn."",
+  ""confidence"": ""High""
+}"
+2,3221298,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer is at risk due to occasional usage and could be persuaded with a relevant offer."",
+  ""customer_receptivity"": ""High, as the uplift score is positive, indicating a potential response to a relevant intervention."",
+  ""intervention_type"": ""Discount Offer"",
+  ""channel"": ""Email"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""We noticed you've been enjoying our services and want to keep you around. Enjoy a 15% discount on your next purchase to keep the fun going!"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The customer is likely to respond positively to the offer and continue using the service."",
+  ""confidence"": ""High""
+}"
+2,3188998,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer is price sensitive, indicating they may be considering switching to a cheaper alternative."",
+  ""customer_receptivity"": ""High, as they are persuadable and their uplift score is slightly positive, suggesting they may be open to additional value propositions."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""Hey [Customer Name], we noticed you might be looking for savings! Try our latest promotions to keep enjoying our services without the hassle of switching. Let's work together to save you some money. 🌟"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The personalized content is likely to resonate with the price-sensitive customer, potentially reducing churn by highlighting value for money."",
+  ""confidence"": ""Medium""
+}"
+2,3130402,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Lack of recent engagement leading to potential loss of interest in the product."",
+  ""customer_receptivity"": ""High, as the uplift score is positive, indicating this customer is likely open to re-engagement efforts."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Hi [Customer Name], I noticed you haven't used our service recently. I wanted to check in and see if everything's going well with your experience. We have some exciting updates that might interest you, and I’m here to help you get the most out of our service. How does that sound?"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The proactive call could re-engage the customer and prevent them from churning, potentially saving CLV of $500."",
+  ""confidence"": ""High""
+}"
+2,3237486,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer is at risk due to occasional usage and could be persuaded with personalized content."",
+  ""customer_receptivity"": ""High, as they are classified as 'Persuadable' and have a slight uplift score."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you’ve been using our service less lately. Here are some new features we think you’ll love and help make your experience even better! 🚀"",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""Expected to increase engagement and reduce churn by 15-20%."",
+  ""confidence"": ""Medium""
+}"
+2,3229430,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer is at risk due to occasional usage and potential competitors offering better deals."",
+  ""customer_receptivity"": ""High, as the uplift score is positive, indicating willingness to engage."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you've been using our service less recently. We have some new features and exclusive content just for you. Let's stay in touch and continue enjoying all the benefits together!"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""Increase customer engagement and reduce churn risk by reminding them of the value and new features of the service."",
+  ""confidence"": ""High""
+}"
+2,3039558,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""The customer has a high churn probability due to inactivity but shows slight interest in the product based on uplift score."",
+  ""customer_receptivity"": ""High, as the customer is 'Persuadable' and has shown slight interest, making them more likely to engage with a personalized intervention."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you've been a valued customer and wanted to share some new features that might make your experience even better. Let's stay connected and keep making the most of our service together!"",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""The customer is likely to engage with the new content and potentially increase their activity level, reducing churn risk."",
+  ""confidence"": ""Medium""
+}"
+2,3221970,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Customer is price sensitive, indicating they might consider switching if a competitor offers a better deal."",
+  ""customer_receptivity"": ""High, as the uplift score is slightly positive, suggesting they are open to further persuasion."",
+  ""intervention_type"": ""Discount Offer"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you've been using our app a lot lately! To keep you happy, we're offering you a 10% discount on your next purchase. Enjoy the savings and keep enjoying our services."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The immediate offer is likely to increase the customer's satisfaction and loyalty, reducing the risk of churn."",
+  ""confidence"": ""High""
+}"
+2,3093022,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Lapsed customers are at risk of churning due to inactivity."",
+  ""customer_receptivity"": ""High, as the uplift score is positive and the customer type is 'Persuadable'."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you haven't been using our service recently. We'd love to share some new features and content that might interest you!"",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""Increased engagement and reduced churn probability."",
+  ""confidence"": ""High""
+}"
+2,3258734,Persuadable,True,True,"{
+  ""primary_risk_reason"": ""Potential loss of a loyal customer due to minor dissatisfaction, indicated by a slight negative uplift score."",
+  ""customer_receptivity"": ""Medium, as the customer is marked as 'Persuadable', but is currently loyal."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""We noticed you've been with us for a while and wanted to share some new features and exclusive content we think you might enjoy. Let’s keep connecting and making the most of your time with us!"",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""The personalized content is likely to re-engage the customer and reinforce their loyalty, potentially reducing churn."",
+  ""confidence"": ""Medium""
+}"
+2,3096718,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Lapsed customers may not be actively using the service and could be at risk of churning."",
+  ""customer_receptivity"": ""High, as they are still active and have shown some interest in the product through their past usage."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Hello [Customer Name], we noticed you haven't used our service recently. We'd love to hear how we can better support you and ensure you get the most out of our product. Let's catch up and see how we can help you today."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""This proactive call could reignite interest and usage, reducing the risk of churn."",
+  ""confidence"": ""High""
+}"
+2,3372394,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Potential price sensitivity could lead to future churn despite low current churn probability."",
+  ""customer_receptivity"": ""High, as the uplift score is positive and indicates a willing customer."",
+  ""intervention_type"": ""Discount Offer"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""Enjoy a special discount on our latest features! We value your feedback and want you to experience all our tools have to offer."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""Increased customer satisfaction and reduced risk of future churn due to perceived value."",
+  ""confidence"": ""High""
+}"
+2,3084910,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Lapsed customers may not be actively using the service and could be at risk of churning."",
+  ""customer_receptivity"": ""High, as these customers have been active in the past and are likely still interested in the service."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Hello [Customer Name], we noticed you haven't used our service recently. We'd love to hear how we can better support you and ensure you get the most out of our platform. Let's set up a quick call to discuss any questions or concerns you might have."",
+  ""intervention_cost_estimate"": ""Medium ($10-25)"",
+  ""expected_outcome"": ""This proactive call could re-engage the customer and address any potential issues, reducing the risk of churn."",
+  ""confidence"": ""High""
+}"
+2,3003882,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Potential for decreased engagement due to seasonal factors or minor issues."",
+  ""customer_receptivity"": ""High, as the customer is a Champion and has a positive uplift score, indicating they are responsive to positive reinforcement."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you’ve been an active user lately. Here’s a curated list of our latest features tailored to your interests to help you make the most out of your experience."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""Increased engagement and a stronger sense of value from the customer, reducing the churn probability."",
+  ""confidence"": ""High""
+}"
+2,3283914,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer is price sensitive, indicating they might consider switching if a competitor offers a better deal."",
+  ""customer_receptivity"": ""High, as the customer is not classified as a 'Lost Cause' and the churn probability is relatively low."",
+  ""intervention_type"": ""Discount Offer"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Get the most out of your subscription! Enjoy a special discount on your next billing cycle. Thank you for choosing us."",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""The customer is likely to feel valued and less inclined to seek a cheaper alternative, thus reducing churn risk."",
+  ""confidence"": ""High""
+}"
+2,3314878,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer is price sensitive, indicating they may consider switching if a competitor offers a better deal."",
+  ""customer_receptivity"": ""High, as the uplift score is positive, suggesting the customer is open to engaging and can be influenced by value-added content or offers."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Discover new ways to save with our exclusive offers! Get personalized tips and savings opportunities tailored just for you."",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The customer will engage with the content and feel valued, reducing the likelihood of churning."",
+  ""confidence"": ""High""
+}"
+2,3340578,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer is at risk due to minor dissatisfaction indicated by low uplift score."",
+  ""customer_receptivity"": ""High, as the customer has a positive outlook and is valuable to retain."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""We noticed you’ve been inactive lately. Dive back in and explore new features we’ve added to make your experience even better!"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""Increase customer engagement and satisfaction, leading to a higher likelihood of retention."",
+  ""confidence"": ""High""
+}"
+2,3260294,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Low churn probability indicates minimal risk of churn, but +0.079 uplift score suggests room for improvement in customer satisfaction or engagement."",
+  ""customer_receptivity"": ""High, as the customer is identified as a 'Sure Thing,' meaning they are likely to be receptive to any additional value or content."",
+  ""intervention_type"": ""Personalized Content"",
+  ""channel"": ""In-App Notification"",
+  ""timing"": ""During next session"",
+  ""message_framing"": ""Get ready for your next session! We’ve curated some content that we think you’ll love based on your past interests. Stay tuned for more personalized recommendations."",
+  ""intervention_cost_estimate"": ""Low ($1-5)"",
+  ""expected_outcome"": ""The personalized content will likely enhance the customer’s experience and reinforce their loyalty, potentially increasing their CLV further."",
+  ""confidence"": ""High""
+}"
+2,3210698,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer is at risk due to moderate churn probability but shows slight interest in the product."",
+  ""customer_receptivity"": ""High, as the customer shows slight interest but is still at risk, indicating potential for positive engagement."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Immediate"",
+  ""message_framing"": ""Hi, I noticed you've been using our service regularly. I wanted to check in and make sure everything is going well with your experience. If there's anything we can improve, please let me know!"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""Increased customer satisfaction and engagement, potentially reducing churn."",
+  ""confidence"": ""High""
+}"
+2,3347386,Sure Thing,True,True,"{
+  ""primary_risk_reason"": ""Customer is at risk due to occasional usage patterns, suggesting potential dissatisfaction or lack of engagement."",
+  ""customer_receptivity"": ""High, as the uplift score is positive, indicating that the customer is open to increased value propositions."",
+  ""intervention_type"": ""Proactive Support Call"",
+  ""channel"": ""Direct Call"",
+  ""timing"": ""Within 24 hours"",
+  ""message_framing"": ""Hi there! I noticed you’ve been using our service less recently. I wanted to see how I can help make your experience even better. Would you like to chat about any features or services that could be useful to you?"",
+  ""intervention_cost_estimate"": ""Low"",
+  ""expected_outcome"": ""The proactive call is expected to re-engage the customer and potentially uncover new needs or pain points, leading to higher satisfaction and retention."",
+  ""confidence"": ""High""
+}"
+2,3363410,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention is unlikely to change the customer's behavior given their 'Lost Cause' status and high churn probability.""
+}"
+2,3309338,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is classified as a 'Lost Cause', any intervention is likely to be counterproductive as this customer is unlikely to retain regardless of the action taken. Their current negative perception and low likelihood of conversion outweigh the potential benefits of re-engagement efforts.""
+}"
+2,3353114,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer type is 'Lost Cause', any intervention is likely to be counterproductive as the customer is unlikely to respond positively to any offer or support.""
+}"
+2,3331766,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is classified as a 'Lost Cause', any intervention is likely to be counterproductive as they are not responsive to pricing changes or additional incentives.""
+}"
+2,3314550,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is classified as a 'Lost Cause', any intervention is likely to be counterproductive as this customer is unlikely to retain regardless of the action taken. Their current negative perception and low likelihood of conversion outweigh the potential benefits of re-engagement efforts.""
+}"
+2,3195330,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention is unlikely to change the customer's behavior given their 'Lost Cause' status and low churn probability, making additional investment less effective.""
+}"
+2,3322130,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is classified as a 'Lost Cause', any intervention is likely to be counterproductive as they are not responsive to engagement efforts and their CLV suggests they are not worth the cost of reengagement.""
+}"
+2,3170222,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention is unlikely to change the customer's behavior given their 'Lost Cause' status and low uplift score.""
+}"
+2,3197038,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the 'Lost Cause' customer type, any intervention is likely to be counterproductive as this customer is unlikely to respond positively to retention efforts. The high churn probability and minimal uplift score suggest that the customer is not interested in additional offerings or support.""
+}"
+2,3334510,Lost Cause,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is classified as a 'Lost Cause', any intervention is likely to be counterproductive as the customer is unlikely to stay regardless of the action taken. The high churn probability and low uplift score further confirm that this customer is unlikely to respond positively to any form of intervention.""
+}"
+2,3042278,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer type is 'Sleeping Dog', there is little potential for reactivation, making any intervention unlikely to result in positive outcomes. Engaging with a 'Sleeping Dog' may disrupt their inactive state and could be counterproductive to retention efforts.""
+}"
+2,3381546,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Since the customer is classified as a 'Sleeping Dog', they are not actively using the service and any intervention might be counterproductive. Reactivating such customers often requires significant effort and resources that might not yield a positive ROI given their current status.""
+}"
+2,3016650,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer type is 'Sleeping Dog', there is little potential for engagement or meaningful interaction that could change their current state of inactivity. Interventions are unlikely to result in a positive outcome, and could potentially disrupt their current satisfied state without adding significant value.""
+}"
+2,3351114,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Since the customer is classified as a 'Sleeping Dog', they are not actively using the service and any intervention may be counterproductive. Reviving a dormant user requires a more targeted approach that focuses on re-engagement rather than retention strategies for price-sensitive users.""
+}"
+2,3097610,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention would likely be counterproductive as this customer is classified as a 'Sleeping Dog', indicating they are not currently interested in engaging with the service and could be deterred by additional outreach.""
+}"
+2,3303466,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer type is 'Sleeping Dog', there is little to no potential for increasing engagement or value. Interventions would likely be counterproductive as this customer is currently not using the service despite the high CLV.""
+}"
+2,3305298,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Intervention would likely be counterproductive as 'Sleeping Dog' customers are not showing signs of immediate churn and may not respond well to additional incentives.""
+}"
+2,3275250,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Given the customer is classified as a 'Sleeping Dog', they are not actively using the service and any intervention might be counterproductive as they may not see value in the product despite being price-sensitive. Further engagement is needed before considering a reactivation strategy.""
+}"
+2,3366194,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Since the customer is classified as a 'Sleeping Dog', they are not actively using the service and any intervention may be counterproductive as they are unlikely to engage with the service regardless of the offer.""
+}"
+2,3021406,Sleeping Dog,True,True,"{
+  ""do_not_intervene_reason"": ""Given the 'Sleeping Dog' customer type, this customer is currently not engaging with the service and an intervention is likely to be counterproductive as they are already at a low risk of churn. Attempting to re-engage them with a proactive intervention could disrupt their current state of non-engagement and potentially lead to disinterest or dissatisfaction.""
+}"

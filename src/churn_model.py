@@ -65,6 +65,8 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import StratifiedKFold, train_test_split
 
+from published_columns import restrict_for_publication
+
 warnings.filterwarnings("ignore")
 
 logger = logging.getLogger(__name__)
@@ -230,7 +232,28 @@ def train_segment_model(
         early_stopping_rounds=50,
         use_best_model=True,
     )
-    best_iteration = int(getattr(base_clf, "best_iteration_", None) or params["iterations"])
+    # `or` here was a live defect, not a style choice. CatBoost sets
+    # `best_iteration_` to 0 when the first iteration is the best one -- which
+    # happens, and did: the Lapsed segment trained a ONE-tree model, and `0 or
+    # 500` reported it as 500. The README's "Trees" column printed 500 for a
+    # model holding a single tree, a 500x overstatement generated automatically
+    # and checked by CI, because CI compares the README against this number
+    # rather than against the model.
+    #
+    # `tree_count_` is what the column claims to report, so it is what gets
+    # reported. `best_iteration` is kept alongside it because the early-stopping
+    # discussion below refers to it, and the two differ by one.
+    bi = getattr(base_clf, "best_iteration_", None)
+    best_iteration = int(bi) if bi is not None else int(params["iterations"])
+    tree_count = int(getattr(base_clf, "tree_count_", None) or best_iteration + 1)
+    if tree_count <= 1:
+        logger.warning(
+            "Segment %s produced a %d-tree model: early stopping found no "
+            "improvement past the first iteration. Its holdout AUC is still a real "
+            "number, but it comes from a single tree and should be reported as such "
+            "rather than alongside multi-hundred-tree models without comment.",
+            segment_name, tree_count,
+        )
 
     # ── Isotonic calibration ─────────────────────────────────────────────────
     cal_raw = base_clf.predict_proba(X_cal)[:, 1]
@@ -288,6 +311,7 @@ def train_segment_model(
         "holdout_brier_uncalibrated": holdout_brier_uncalibrated,
         "n_calibration": int(len(y_cal)),
         "best_iteration": best_iteration,
+        "tree_count": tree_count,
     }
 
     # MLflow logging
@@ -317,6 +341,7 @@ def train_segment_model(
                     "holdout_brier": holdout_brier,
                     "holdout_brier_uncalibrated": holdout_brier_uncalibrated,
                     "best_iteration": float(best_iteration),
+                    "tree_count": float(tree_count),
                     "churn_rate": float(y.mean()),
                     "n_train": float(len(y)),
                     "n_test": float(len(y_test)),
@@ -328,9 +353,9 @@ def train_segment_model(
 
     logger.info(
         "Segment '%s': CV AUC=%.3f | Holdout AUC=%.3f | Holdout Brier %.4f→%.4f "
-        "(calibrated) | best_iter=%d | n_fit=%d, n_cal=%d, n_test=%d, churn_rate=%.2f%%",
+        "(calibrated) | trees=%d (best_iter=%d) | n_fit=%d, n_cal=%d, n_test=%d, churn_rate=%.2f%%",
         segment_name, cv_auc, holdout_auc, holdout_brier_uncalibrated, holdout_brier,
-        best_iteration, len(y_fit), len(y_cal), len(y_test), y.mean() * 100,
+        tree_count, best_iteration, len(y_fit), len(y_cal), len(y_test), y.mean() * 100,
     )
 
     return {
@@ -455,9 +480,14 @@ def run_churn_pipeline(
     df: pd.DataFrame,
     feature_cols: list,
     experiment_name: str = "CustomerChurnEngine",
+    dataset: str | None = None,
 ) -> dict:
     """
     Full per-segment churn modeling pipeline with MLflow tracking.
+
+    ``dataset`` names the source dataset so the parquet this writes can be
+    stripped of source columns before it is committed (see
+    ``src/published_columns.py``). None strips nothing.
     """
     os.makedirs(MODELS_PATH, exist_ok=True)
 
@@ -519,7 +549,9 @@ def run_churn_pipeline(
 
     # Save artifacts
     joblib.dump(segment_models, os.path.join(MODELS_PATH, "segment_models.pkl"))
-    df_scored.to_parquet(os.path.join(PROCESSED_PATH, "scored.parquet"), index=False)
+    restrict_for_publication(df_scored, dataset).to_parquet(
+        os.path.join(PROCESSED_PATH, "scored.parquet"), index=False
+    )
     logger.info("Saved scored data. High-risk customers: %d", (df_scored["RiskTier"] == "High Risk").sum())
 
     return {
@@ -539,10 +571,10 @@ if __name__ == "__main__":
     df = build_pipeline(save=True)
     feature_sets = get_feature_sets()
 
-    seg_results = run_segmentation(df, feature_sets["clustering"])
+    seg_results = run_segmentation(df, feature_sets["clustering"], dataset="ecommerce")
     df_seg = seg_results["df"]
 
-    churn_results = run_churn_pipeline(df_seg, feature_sets["churn_model"])
+    churn_results = run_churn_pipeline(df_seg, feature_sets["churn_model"], dataset="ecommerce")
     df_final = churn_results["df"]
 
     print("\nRisk Distribution:")

@@ -1,0 +1,134 @@
+{
+  "n_rows": 51047,
+  "uplift_features": [
+    "EngagementScore",
+    "RecencySignal",
+    "StickinessIndex",
+    "SpendTrend",
+    "SupportRiskScore",
+    "TenureStability",
+    "CityTier",
+    "SatisfactionScore",
+    "Complain"
+  ],
+  "treatment_definition": "Treatment = (Complain==1) | (CouponUsed>0); on Cell2Cell Complain = CustomerCareCalls>3, CouponUsed = RespondsToMailOffers",
+  "positivity": {
+    "crosstab_complain_x_treatment": {
+      "Complain=0": {
+        "T=0": 25641,
+        "T=1": 16934
+      },
+      "Complain=1": {
+        "T=0": 0,
+        "T=1": 8472
+      }
+    },
+    "P(T=1|Complain=1)": 1.0,
+    "P(T=1|Complain=0)": 0.39774515560775103,
+    "share_rows_with_Complain=1": 0.1659646991987776,
+    "propensity[logistic]": {
+      "cv_auc_T_from_X": 0.8337102579801154,
+      "share_e<0.05": 0.10286598624796756,
+      "share_e>0.95": 0.1659646991987776,
+      "share_e>0.99": 0.1659646991987776,
+      "share_outside_[0.1,0.9]": 0.39032656179599196,
+      "mean_e_given_Complain=1": 0.9998623500288106,
+      "min_e_given_Complain=1": 0.9993594326555031,
+      "mean_e_given_Complain=0": 0.3977600151989782
+    },
+    "propensity[hist_gbm]": {
+      "cv_auc_T_from_X": 0.8322047898525897,
+      "share_e<0.05": 0.14202597606127687,
+      "share_e>0.95": 0.1659646991987776,
+      "share_e>0.99": 0.1659646991987776,
+      "share_outside_[0.1,0.9]": 0.3814523870158873,
+      "mean_e_given_Complain=1": 0.9995554069506154,
+      "min_e_given_Complain=1": 0.9989131750613854,
+      "mean_e_given_Complain=0": 0.39810030098838123
+    },
+    "standardized_mean_difference_T1_vs_T0": {
+      "EngagementScore": 0.15672181055308843,
+      "RecencySignal": -0.03970890721380757,
+      "StickinessIndex": 0.04726632047007684,
+      "SpendTrend": -0.01558417328455156,
+      "SupportRiskScore": 1.0243067149932814,
+      "TenureStability": -0.014851403258867092,
+      "CityTier": 0.625483025359574,
+      "SatisfactionScore": 0.07542696903830187,
+      "Complain": 1.0002755339942493,
+      "ChurnProbability": -0.339303805829025
+    }
+  },
+  "direction_check_on_various_scores": {
+    "shipped UpliftScore": {
+      "direction_ok": true,
+      "churn_top_uplift_decile": 0.2554,
+      "churn_bottom_uplift_decile": 0.4246,
+      "gap": 0.1692
+    },
+    "sign-flipped UpliftScore (bug)": {
+      "direction_ok": false,
+      "churn_top_uplift_decile": 0.4246,
+      "churn_bottom_uplift_decile": 0.2554,
+      "gap": -0.1692
+    },
+    "minus ChurnProbability (pure risk score, no causal content)": {
+      "direction_ok": true,
+      "churn_top_uplift_decile": 0.0732,
+      "churn_bottom_uplift_decile": 0.5135,
+      "gap": 0.4404
+    },
+    "random noise": {
+      "direction_ok": true,
+      "churn_top_uplift_decile": 0.2767,
+      "churn_bottom_uplift_decile": 0.2837,
+      "gap": 0.0071
+    }
+  },
+  "sign_flip": {
+    "fixed (shipped)": {
+      "type_counts": {
+        "Sleeping Dog": 22492,
+        "Lost Cause": 18222,
+        "Persuadable": 7602,
+        "Sure Thing": 2731
+      },
+      "n_persuadable": 7602,
+      "n_persuadable_with_positive_reported_roi": 7602,
+      "pipeline_reported_net_roi_sum_over_persuadables_usd": 166767.98725247383,
+      "pipeline_reported_net_roi_sum_over_positive_roi_persuadables_usd": 166767.98725247383,
+      "fixed_model_net_roi_sum_for_this_set_usd": 166767.98725247383,
+      "observed_churn_rate_in_set": 0.4148908182057353,
+      "mean_ChurnProbability_in_set": 0.39703691127590374
+    },
+    "buggy (pre-fix sign)": {
+      "type_counts": {
+        "Lost Cause": 25272,
+        "Sleeping Dog": 24743,
+        "Persuadable": 552,
+        "Sure Thing": 480
+      },
+      "n_persuadable": 552,
+      "n_persuadable_with_positive_reported_roi": 552,
+      "pipeline_reported_net_roi_sum_over_persuadables_usd": 13131.328919231892,
+      "pipeline_reported_net_roi_sum_over_positive_roi_persuadables_usd": 13131.328919231892,
+      "fixed_model_net_roi_sum_for_this_set_usd": -29691.32891923189,
+      "observed_churn_rate_in_set": 0.4673913043478261,
+      "mean_ChurnProbability_in_set": 0.3863382778727362
+    },
+    "persuadable_overlap": {
+      "intersection": 0,
+      "jaccard": 0.0
+    },
+    "top100_priority_overlap": 0,
+    "spearman_fixed_vs_buggy_score": -1.0,
+    "assumptions": {
+      "avg_clv": 500.0,
+      "intervention_cost": 15.0,
+      "thresholds": "uplift>=0.05 and churn_prob>=0.30 (classify_customer_type defaults)"
+    }
+  },
+  "mean_uplift_score": 0.02459700455795366,
+  "share_uplift_ge_0.05": 0.20242129801947226,
+  "share_uplift_ge_0.03_breakeven_at_clv500_cost15": 0.4258428507062119
+}

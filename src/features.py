@@ -17,6 +17,7 @@ import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 
 from composite_features import add_composite_features, fit_composite_norms
+from published_columns import restrict_for_publication
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +231,9 @@ def build_pipeline(save: bool = True) -> pd.DataFrame:
     if save:
         os.makedirs(PROCESSED_PATH, exist_ok=True)
         out_path = os.path.join(PROCESSED_PATH, "features.parquet")
-        df.to_parquet(out_path, index=False)
+        # A no-op today: see the SOURCE_COLUMNS note in src/published_columns.py --
+        # on this path the source column names are the model's feature names.
+        restrict_for_publication(df, "ecommerce").to_parquet(out_path, index=False)
         logger.info("Saved processed features to %s", out_path)
 
     logger.info("Pipeline complete. Shape: %s", df.shape)

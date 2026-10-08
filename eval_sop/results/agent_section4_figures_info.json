@@ -1,0 +1,24 @@
+{
+  "n_boot": 2000,
+  "boot_seed": 0,
+  "cluster": "customer_id",
+  "n_customers": 40,
+  "estimators": {
+    "ratio": "sum(num)/sum(den) over runs",
+    "percustomer": "unweighted mean over customers of num/den"
+  },
+  "multiple_comparison_correction": "none; all intervals are uncorrected",
+  "agent_unparseable_by_customer_type": {
+    "Lost Cause": 13,
+    "Persuadable": 2,
+    "Sleeping Dog": 3,
+    "Sure Thing": 2
+  },
+  "agent_across_seed_std": {
+    "valid_json": 0.11273124382057234,
+    "agrees_with_rule": 0.10408329997330663
+  },
+  "source": [
+    "results/agent_eval_rows.csv"
+  ]
+}

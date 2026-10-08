@@ -1,0 +1,40 @@
+# Environment for the section-11 re-run: the three feature fixes, the two
+# reporting fixes, and every figure in RESULTS.md section 1 as it now stands.
+#
+# This is NOT the same environment as requirements-eval.txt, and the difference
+# is the point. That file used numpy 2.4.6 and carried the note "repo
+# requirements.txt pins numpy<2.1 ... Not tested at the pin." This one IS at the
+# pin: numpy 2.0.2 satisfies `numpy>=1.24,<2.1`, so section 11 is the first run
+# of this project in the environment its own requirements.txt declares.
+#
+# Two consequences worth stating rather than leaving to be inferred:
+#
+#  - causalml, pacmap and numba all import here, so src/pipeline.py runs end to
+#    end and the uplift stage goes through CausalML rather than the silent custom
+#    T-learner fallback (models/uplift_metrics.pkl records
+#    "T-Learner + S-Learner ensemble (CausalML)").
+#  - scikit-learn is 1.9.1, not the 1.8.0 in requirements-eval.txt. Unpickling
+#    models/segment_models.pkl under 1.8.0 raises InconsistentVersionWarning, so
+#    the committed models are the ones built here. Anything in this file's
+#    lineage should be read against 1.9.1.
+#
+# The ambient Anaconda on the development machine has numpy 2.5, which breaks
+# numba and therefore pacmap: src/pipeline.py cannot run there at all -- it dies
+# at `import pacmap` in stage 2, before it could reach the causalml fallback.
+#
+# Python 3.12.3, Windows 11. Captured with importlib.metadata.
+# Create with:  python -m venv <dir>  &&  pip install -r eval_sop/requirements-rerun.txt
+numpy==2.0.2
+pandas==2.3.3
+scikit-learn==1.9.1
+scipy==1.18.1
+catboost==1.2.10
+xgboost==3.2.0
+causalml==0.16.0
+numba==0.68.0
+pacmap==0.9.1
+shap==0.47.2
+lightgbm==4.7.0
+pyarrow==23.0.1
+joblib==1.5.3
+mlflow==3.11.1

@@ -24,6 +24,7 @@ import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 
 from composite_features import add_composite_features, fit_composite_norms
+from published_columns import restrict_for_publication
 
 logger = logging.getLogger(__name__)
 
@@ -319,7 +320,11 @@ def build_olist_pipeline(save: bool = True) -> pd.DataFrame:
     if save:
         os.makedirs(PROCESSED_PATH, exist_ok=True)
         out_path = os.path.join(PROCESSED_PATH, "features.parquet")
-        df.to_parquet(out_path, index=False)
+        # A no-op today (Olist has no declared source schema -- it is built by
+        # aggregating nine normalised tables, so no output column is a verbatim
+        # row-level copy). Routed through the projection anyway so that
+        # declaring a schema later protects this write site automatically.
+        restrict_for_publication(df, "olist").to_parquet(out_path, index=False)
         logger.info("Saved Olist features to %s", out_path)
 
     logger.info("Olist pipeline complete. Shape: %s | Churn rate: %.1f%%",
